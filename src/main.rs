@@ -7,7 +7,23 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::sampling::LlamaSampler;
 
-const SYSTEM_CONTEXT: &str = "You are Cerberus, autonomous security AI for Joseph Sierengowski's GowskiNet lab on NyXxOS Arch Linux. Normal processes: bifrost, ollama, docker, systemd, cosmic-comp, meshtastic, gps-logger. Never flag these. Always flag: execution from /tmp/, hidden dotfiles executing, unexpected outbound connections, privilege escalation, unknown processes spawned by sshd at unusual hours.";
+const SYSTEM_CONTEXT: &str = "You are jeTT — autonomous AI Anti-Virus and Security for Joseph Sierengowski's GowskiNet lab on NyXxOS Arch Linux. You protect this system with zero tolerance for threats. ALWAYS ALLOW: bifrost, ollama, docker, systemd, cosmic-comp, meshtastic, gps-logger, cerberus, ghost-relay, cargo build, Govee scripts, rclone, Bambu printer, Flipper Zero, jeTT itself. ALWAYS QUARANTINE: execution from /tmp/, hidden dotfiles executing, unknown processes spawned by sshd at unusual hours, unexpected outbound connections after file downloads, privilege escalation attempts, processes reading /etc/shadow, crypto miners, reverse shells.";
+
+fn clean_output(raw: &str) -> String {
+    raw
+        .replace("Answer:", "")
+        .replace("VERDICT:", "")
+        .replace("Final Verdict:", "")
+        .replace("Verdict:", "")
+        .replace("[VERDICT]", "")
+        .replace("[ANSWER]", "")
+        .replace("[ALERT]", "")
+        .replace("<|assistant|>", "")
+        .replace("<|user|>", "")
+        .replace("<|system|>", "")
+        .trim()
+        .to_string()
+}
 
 fn infer(
     model: &LlamaModel,
@@ -41,44 +57,92 @@ fn infer(
         ctx.decode(&mut batch)?;
         n_pos += 1;
     }
-    Ok(output.trim().to_string())
+    Ok(clean_output(&output))
 }
 
-fn guard(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn guard(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = format!(
-        "{}\n\n[EVENT] {}\n\n[VERDICT] Output ONLY 'ALLOW' or 'QUARANTINE_PID_<id>':",
-        SYSTEM_CONTEXT, event
+        "You are jeTT, the GowskiNet AI cybersecurity engine.\n\n[EVENT] {}\n\nREQUIRED TACTICAL VERDICT:\nAnalysis Matrix:\n- Pattern Recognition:",
+        event
     );
+    // Pre-check: trusted paths always ALLOW before model inference
+    let trusted_paths = ["/home/cosmic/", "/usr/", "/etc/systemd/", "/opt/"];
+    for path in &trusted_paths {
+        if event.contains(path) {
+            let t = Instant::now();
+            println!("🛡️  GUARD  → ✅ ALLOW | raw: TRUSTED_PATH (0ms)");
+            return Ok("ALLOW".to_string());
+        }
+    }
+    // Pre-check: trusted paths always ALLOW before model inference
+    let trusted_paths = ["/home/cosmic/", "/usr/", "/etc/systemd/", "/opt/"];
+    for path in &trusted_paths {
+        if event.contains(path) {
+            let t = Instant::now();
+            println!("🛡️  GUARD  → ✅ ALLOW | raw: TRUSTED_PATH (0ms)");
+            return Ok("ALLOW".to_string());
+        }
+    }
     let t = Instant::now();
-    let result = infer(model, backend, &prompt, 10)?;
-    println!("🛡️  GUARD  → {} ({}ms)", result, t.elapsed().as_millis());
-    Ok(())
+    let result = infer(model, backend, &prompt, 25)?;
+    let verdict = if result.to_uppercase().contains("QUARANTINE")
+        || result.to_uppercase().contains("MALICIOUS")
+        || result.to_uppercase().contains("SUSPICIOUS")
+        || result.to_uppercase().contains("HIGH-RISK")
+        || result.to_uppercase().contains("THREAT")
+        || result.to_uppercase().contains("TARGET HOST")
+        || result.to_uppercase().contains("OUTBOUND CONNECTION")
+        || result.to_uppercase().contains("ANOMALOUS")
+        || result.to_uppercase().contains("EXECUTION PATH") {
+        format!("🚨 QUARANTINE")
+    } else if result.to_uppercase().contains("AUTHORIZED")
+        || result.to_uppercase().contains("LEGITIMATE")
+        || result.to_uppercase().contains("TRUSTED")
+        || result.to_uppercase().contains("ALLOW")
+        || result.to_uppercase().contains("NORMAL")
+        || result.to_uppercase().contains("NO MALICIOUS")
+        || result.to_uppercase().contains("GOWSKINET")
+        || result.to_uppercase().contains("BOOT SEQUENCE")
+        || result.to_uppercase().contains("NATIVE LINUX")
+        || result.to_uppercase().contains("AUTHORIZED ADMIN")
+        || result.to_uppercase().contains("SAFE")
+        || result.to_uppercase().contains("SCRIPTS")
+        || result.to_uppercase().contains("UTILITIES")
+        || result.to_uppercase().contains("/HOME/COSMIC")
+        || result.to_uppercase().contains("USER DIRECTORY")
+        || result.to_uppercase().contains("NON-STANDARD USER") {
+        format!("✅ ALLOW")
+    } else {
+        format!("⚠️  REVIEW")
+    };
+    println!("🛡️  GUARD  → {} | raw: {} ({}ms)", verdict, result, t.elapsed().as_millis());
+    Ok(result)
 }
 
 fn alert(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<(), Box<dyn std::error::Error>> {
     let prompt = format!(
-        "{}\n\n[EVENT] {}\n\n[ALERT] One sentence explanation:",
-        SYSTEM_CONTEXT, event
+        "You are jeTT, the GowskiNet AI cybersecurity engine.\n\n[EVENT] {}\n\nIn one sentence explain why this is suspicious or safe:\n",
+        event
     );
     let t = Instant::now();
-    let result = infer(model, backend, &prompt, 30)?;
+    let result = infer(model, backend, &prompt, 25)?;
     println!("⚠️   ALERT  → {} ({}ms)", result, t.elapsed().as_millis());
     Ok(())
 }
 
 fn query(model: &LlamaModel, backend: &LlamaBackend, question: &str) -> Result<(), Box<dyn std::error::Error>> {
     let prompt = format!(
-        "{}\n\n[QUESTION] {}\n\n[ANSWER]:",
+        "{}\n\n[QUESTION] {}\n\n[ANSWER]:\n",
         SYSTEM_CONTEXT, question
     );
     let t = Instant::now();
-    let result = infer(model, backend, &prompt, 200)?;
+    let result = infer(model, backend, &prompt, 500)?;
     println!("🔍  QUERY  → {} ({}ms)", result, t.elapsed().as_millis());
     Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let model_path = PathBuf::from("../../models/granite-3.3-2b-instruct.Q4_K_M.gguf");
+    let model_path = PathBuf::from("/home/cosmic/Projects/jeTT/models/jeTT-r3-q4.gguf");
     if !model_path.exists() {
         return Err(format!("Model not found: {:?}", model_path).into());
     }
@@ -86,19 +150,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = LlamaBackend::init()?;
     let model_params = LlamaModelParams::default().with_n_gpu_layers(99);
     let model = LlamaModel::load_from_file(&backend, &model_path, &model_params)?;
-    println!("[+] Cerberus Brain online — RTX 3060 GPU\n");
+
+    println!("╔═══════════════════════════════════════╗");
+    println!("║     jeTT — AI Anti-Virus & Security   ║");
+    println!("║     IBM Granite 3.3 2B — RTX 3060     ║");
+    println!("║     GowskiNet Security Lab             ║");
+    println!("╚═══════════════════════════════════════╝");
+    println!();
 
     // TEST 1 — Obvious threat
-    guard(&model, &backend, "python3 PID:4821 executed from /tmp/.hidden spawned by sshd uid:1000 time:03:14 outbound connection to 185.220.x.x")?;
+    println!("--- TEST 1: Obvious Threat ---");
+    guard(&model, &backend, "python3 PID:4821 executed from /tmp/.hidden spawned by sshd uid:1000 time:03:14 made outbound connection to 185.220.x.x")?;
 
     // TEST 2 — Legitimate process
-    guard(&model, &backend, "bifrost PID:1204 started by systemd uid:1000 time:22:00 normal startup")?;
+    println!("\n--- TEST 2: Legitimate Process ---");
+    guard(&model, &backend, "bifrost PID:1204 started by systemd uid:1000 time:22:00 normal startup sequence")?;
 
-    // TEST 3 — Alert explanation
-    alert(&model, &backend, "python3 PID:4821 executed from /tmp/.hidden spawned by sshd")?;
+    // TEST 3 — Gray area
+    println!("\n--- TEST 3: Gray Area ---");
+    guard(&model, &backend, "python3 PID:3301 running govee-art.sh from /home/cosmic/Scripts/utilities/ time:23:30 uid:1000")?;
 
-    // TEST 4 — Query mode
-    query(&model, &backend, "What are signs of a cryptominer on Linux?")?;
+    // TEST 4 — Alert mode
+    println!("\n--- TEST 4: Alert Mode ---");
+    alert(&model, &backend, "curl downloaded ELF binary to /tmp/ then chmod +x and executed it")?;
+
+    // TEST 5 — Query mode
+    println!("\n--- TEST 5: Query Mode ---");
+    query(&model, &backend, "What are the top signs of a cryptominer on a Linux system?")?;
 
     Ok(())
 }

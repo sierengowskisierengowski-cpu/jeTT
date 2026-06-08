@@ -1,7 +1,12 @@
 [package]
-name = "cerberus-brain"
+name = "jeTT"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 llama-cpp-2 = { version = "0.1", features = ["cuda"] }
+
+[[bin]]
+name = "jett-daemon"
+path = "src/bin/daemon.rs"
+
