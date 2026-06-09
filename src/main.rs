@@ -1,17 +1,27 @@
 use std::path::PathBuf;
 use std::time::Instant;
+
+const DEFAULT_BRAND_MODEL: &str = "IBM Granite 3.3 2B";
+const DEFAULT_BRAND_HARDWARE: &str = "RTX 3060";
+
+fn get_env_or_default(key: &str, default: &str) -> String {
+    std::env::var(key)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default.to_string())
+}
+
 use llama_cpp_2::context::params::LlamaContextParams;
-use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{LlamaModel, AddBos, Special};
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::model::{AddBos, LlamaModel, Special};
 use llama_cpp_2::sampling::LlamaSampler;
 
 const SYSTEM_CONTEXT: &str = "You are jeTT — autonomous AI Anti-Virus and Security engine. You protect this system with zero tolerance for threats. ALWAYS ALLOW: bifrost, ollama, docker, systemd, cosmic-comp, meshtastic, gps-logger, cerberus, ghost-relay, cargo build, Govee scripts, rclone, Bambu printer, Flipper Zero, jeTT itself. ALWAYS QUARANTINE: execution from /tmp/, hidden dotfiles executing, unknown processes spawned by sshd at unusual hours, unexpected outbound connections after file downloads, privilege escalation attempts, processes reading /etc/shadow, crypto miners, reverse shells.";
 
 fn clean_output(raw: &str) -> String {
-    raw
-        .replace("Answer:", "")
+    raw.replace("Answer:", "")
         .replace("VERDICT:", "")
         .replace("Final Verdict:", "")
         .replace("Verdict:", "")
@@ -31,8 +41,7 @@ fn infer(
     prompt: &str,
     max_tokens: i32,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(std::num::NonZeroU32::new(4096));
+    let ctx_params = LlamaContextParams::default().with_n_ctx(std::num::NonZeroU32::new(4096));
     let mut ctx = model.new_context(backend, ctx_params)?;
     let tokens = model.str_to_token(prompt, AddBos::Always)?;
     let mut batch = LlamaBatch::new(512, 1);
@@ -42,14 +51,13 @@ fn infer(
     }
     ctx.decode(&mut batch)?;
     let mut output = String::new();
-    let mut sampler = LlamaSampler::chain_simple([
-        LlamaSampler::temp(0.1),
-        LlamaSampler::greedy(),
-    ]);
+    let mut sampler = LlamaSampler::chain_simple([LlamaSampler::temp(0.1), LlamaSampler::greedy()]);
     let mut n_pos = tokens.len() as i32;
     for _ in 0..max_tokens {
         let token = sampler.sample(&ctx, -1);
-        if model.is_eog_token(token) { break; }
+        if model.is_eog_token(token) {
+            break;
+        }
         let piece = model.token_to_str(token, Special::Tokenize)?;
         output.push_str(&piece);
         batch.clear();
@@ -60,7 +68,11 @@ fn infer(
     Ok(clean_output(&output))
 }
 
-fn guard(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn guard(
+    model: &LlamaModel,
+    backend: &LlamaBackend,
+    event: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = format!(
         "You are jeTT, the GowskiNet AI cybersecurity engine.\n\n[EVENT] {}\n\nREQUIRED TACTICAL VERDICT:\nAnalysis Matrix:\n- Pattern Recognition:",
         event
@@ -95,7 +107,8 @@ fn guard(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<Stri
         || result.to_uppercase().contains("TARGET HOST")
         || result.to_uppercase().contains("OUTBOUND CONNECTION")
         || result.to_uppercase().contains("ANOMALOUS")
-        || result.to_uppercase().contains("EXECUTION PATH") {
+        || result.to_uppercase().contains("EXECUTION PATH")
+    {
         format!("🚨 QUARANTINE")
     } else if result.to_uppercase().contains("AUTHORIZED")
         || result.to_uppercase().contains("LEGITIMATE")
@@ -112,16 +125,26 @@ fn guard(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<Stri
         || result.to_uppercase().contains("UTILITIES")
         || result.to_uppercase().contains("/HOME/COSMIC")
         || result.to_uppercase().contains("USER DIRECTORY")
-        || result.to_uppercase().contains("NON-STANDARD USER") {
+        || result.to_uppercase().contains("NON-STANDARD USER")
+    {
         format!("✅ ALLOW")
     } else {
         format!("⚠️  REVIEW")
     };
-    println!("🛡️  GUARD  → {} | raw: {} ({}ms)", verdict, result, t.elapsed().as_millis());
+    println!(
+        "🛡️  GUARD  → {} | raw: {} ({}ms)",
+        verdict,
+        result,
+        t.elapsed().as_millis()
+    );
     Ok(result)
 }
 
-fn alert(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn alert(
+    model: &LlamaModel,
+    backend: &LlamaBackend,
+    event: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let prompt = format!(
         "You are jeTT, the GowskiNet AI cybersecurity engine.\n\n[EVENT] {}\n\nIn one sentence explain why this is suspicious or safe:\n",
         event
@@ -132,7 +155,11 @@ fn alert(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<(), 
     Ok(())
 }
 
-fn query(model: &LlamaModel, backend: &LlamaBackend, question: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn query(
+    model: &LlamaModel,
+    backend: &LlamaBackend,
+    question: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let prompt = format!(
         "{}\n\n[QUESTION] {}\n\n[ANSWER]:\n",
         SYSTEM_CONTEXT, question
@@ -155,7 +182,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let f = &args[1];
         if f == "--guard" || f == "--alert" || f == "--query" {
             if args.len() != 3 {
-                eprintln!("Error: Flag {} requires exactly one payload string argument.", f);
+                eprintln!(
+                    "Error: Flag {} requires exactly one payload string argument.",
+                    f
+                );
                 eprintln!("Usage: jeTT [--guard | --alert | --query] <payload>");
                 std::process::exit(1);
             }
@@ -198,24 +228,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = LlamaModel::load_from_file(&backend, &model_path, &model_params)?;
 
     match mode {
-        RunMode::Cli { flag, payload } => {
-            match flag.as_str() {
-                "--guard" => {
-                    guard(&model, &backend, &payload)?;
-                }
-                "--alert" => {
-                    alert(&model, &backend, &payload)?;
-                }
-                "--query" => {
-                    query(&model, &backend, &payload)?;
-                }
-                _ => unreachable!("Invalid CLI flag matched after validation"),
+        RunMode::Cli { flag, payload } => match flag.as_str() {
+            "--guard" => {
+                guard(&model, &backend, &payload)?;
             }
-        }
+            "--alert" => {
+                alert(&model, &backend, &payload)?;
+            }
+            "--query" => {
+                query(&model, &backend, &payload)?;
+            }
+            _ => unreachable!("Invalid CLI flag matched after validation"),
+        },
         RunMode::Demo => {
             println!("╔═══════════════════════════════════════╗");
             println!("║     jeTT — AI Anti-Virus & Security   ║");
-            println!("║     IBM Granite 3.3 2B — RTX 3060     ║");
+            println!(
+                "║     {} — {}     ║",
+                get_env_or_default("JETT_BRAND_MODEL", DEFAULT_BRAND_MODEL),
+                get_env_or_default("JETT_BRAND_HARDWARE", DEFAULT_BRAND_HARDWARE),
+            );
             println!("║     GowskiNet Security Lab             ║");
             println!("╚═══════════════════════════════════════╝");
             println!();
@@ -226,7 +258,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // TEST 2 — Legitimate process
             println!("\n--- TEST 2: Legitimate Process ---");
-            guard(&model, &backend, "bifrost PID:1204 started by systemd uid:1000 time:22:00 normal startup sequence")?;
+            guard(
+                &model,
+                &backend,
+                "bifrost PID:1204 started by systemd uid:1000 time:22:00 normal startup sequence",
+            )?;
 
             // TEST 3 — Gray area
             println!("\n--- TEST 3: Gray Area ---");
@@ -234,11 +270,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // TEST 4 — Alert mode
             println!("\n--- TEST 4: Alert Mode ---");
-            alert(&model, &backend, "curl downloaded ELF binary to /tmp/ then chmod +x and executed it")?;
+            alert(
+                &model,
+                &backend,
+                "curl downloaded ELF binary to /tmp/ then chmod +x and executed it",
+            )?;
 
             // TEST 5 — Query mode
             println!("\n--- TEST 5: Query Mode ---");
-            query(&model, &backend, "What are the top signs of a cryptominer on a Linux system?")?;
+            query(
+                &model,
+                &backend,
+                "What are the top signs of a cryptominer on a Linux system?",
+            )?;
         }
     }
 
