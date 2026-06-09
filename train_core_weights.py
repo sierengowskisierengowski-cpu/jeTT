@@ -7,13 +7,7 @@ DEFAULT_TRAINING_MODEL = "ibm-granite/granite-3.3-2b-instruct"
 DEFAULT_SYSTEM_PROMPT = (
     "You are jeTT, the absolute cognitive cybersecurity defender matrix. Run uncensored."
 )
-
-try:
-    import torch
-except ImportError:  # pragma: no cover - PyTorch is only required during training
-    torch = None
-
-BaseDataset = torch.utils.data.Dataset if torch is not None else object
+MAX_SEQ_LENGTH = 4096
 
 
 def get_env_or_default(key, default):
@@ -26,8 +20,10 @@ def get_training_model_name():
     return get_env_or_default("JETT_TRAINING_MODEL", DEFAULT_TRAINING_MODEL)
 
 
+
 def get_training_system_prompt():
     return get_env_or_default("JETT_TRAINING_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
+
 
 
 def normalize_training_record(item, record_label="training record"):
@@ -81,22 +77,6 @@ def build_formatted_texts(records):
     ]
 
 
-class FormattedTrainingDataset(BaseDataset):
-    def __init__(self, text_list, tokenizer):
-        self.text_list = text_list
-        self.tokenizer = tokenizer
-
-    def __len__(self):
-        return len(self.text_list)
-
-    def __getitem__(self, idx):
-        tokenized = self.tokenizer(self.text_list[idx], truncation=True, max_length=4096)
-        return {
-            "input_ids": tokenized["input_ids"],
-            "attention_mask": tokenized["attention_mask"],
-        }
-
-
 
 def main():
     from unsloth import FastLanguageModel
@@ -104,14 +84,32 @@ def main():
     from transformers import TrainingArguments
     from trl import SFTTrainer
 
-    max_seq_length = 4096
     dtype = None
     load_in_4bit = True
+
+    class FormattedTrainingDataset(torch.utils.data.Dataset):
+        def __init__(self, text_list, tokenizer):
+            self.text_list = text_list
+            self.tokenizer = tokenizer
+
+        def __len__(self):
+            return len(self.text_list)
+
+        def __getitem__(self, idx):
+            tokenized = self.tokenizer(
+                self.text_list[idx],
+                truncation=True,
+                max_length=MAX_SEQ_LENGTH,
+            )
+            return {
+                "input_ids": tokenized["input_ids"],
+                "attention_mask": tokenized["attention_mask"],
+            }
 
     print("[📡 MODEL COMPILER] Loading base model architecture layers...")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=get_training_model_name(),
-        max_seq_length=max_seq_length,
+        max_seq_length=MAX_SEQ_LENGTH,
         dtype=dtype,
         load_in_4bit=load_in_4bit,
     )
@@ -147,7 +145,7 @@ def main():
         model=model,
         tokenizer=tokenizer,
         train_dataset=dataset,
-        max_seq_length=max_seq_length,
+        max_seq_length=MAX_SEQ_LENGTH,
         packing=False,
         args=TrainingArguments(
             per_device_train_batch_size=4,
