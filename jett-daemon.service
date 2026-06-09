@@ -1,0 +1,14 @@
+[Unit]
+Description=jeTT AI EDR Daemon
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/jett
+Environment=JETT_MODEL=/opt/jett/models/jeTT-q4.gguf
+ExecStart=/bin/sh -c 'if [ -x /usr/local/bin/jett-daemon ]; then exec /usr/local/bin/jett-daemon; else exec /usr/bin/jett-daemon; fi'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
