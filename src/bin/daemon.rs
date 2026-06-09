@@ -13,7 +13,7 @@ use std::collections::HashSet;
 // Feeds events to jeTT AI engine for verdicts
 // ─────────────────────────────────────────────
 
-const MODEL_PATH: &str = "/opt/jett/models/jeTT-q4.gguf";
+
 
 const LOG_DIR: &str = "/var/log/jett";
 const QUARANTINE_DIR: &str = "/var/jett/quarantine";
@@ -293,10 +293,11 @@ fn main() {
     }
 
     println!("[*] Loading jeTT AI model...");
-    println!("[*] Model: {}", MODEL_PATH);
+    let model_path = std::env::var("JETT_MODEL").unwrap_or_else(|_| "/opt/jett/models/jeTT-q4.gguf".to_string());
+    println!("[*] Model: {}", model_path);
     
-    if !Path::new(MODEL_PATH).exists() {
-        eprintln!("[!] Model not found: {}", MODEL_PATH);
+    if !Path::new(&model_path).exists() {
+        eprintln!("[!] Model not found: {}", model_path);
         std::process::exit(1);
     }
 
