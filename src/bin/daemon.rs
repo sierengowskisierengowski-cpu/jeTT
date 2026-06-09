@@ -13,21 +13,22 @@ use std::collections::HashSet;
 // Feeds events to jeTT AI engine for verdicts
 // ─────────────────────────────────────────────
 
-const MODEL_PATH: &str = "/home/cosmic/Projects/jeTT/models/jeTT-r3-q4.gguf";
+const MODEL_PATH: &str = "/opt/jett/models/jeTT-q4.gguf";
+
 const LOG_DIR: &str = "/var/log/jett";
 const QUARANTINE_DIR: &str = "/var/jett/quarantine";
 const VERSION: &str = "1.0.0";
 
 // Trusted paths — instant ALLOW, no AI needed
 const TRUSTED_PATHS: &[&str] = &[
-    "/home/cosmic/",
+    "/home/",  // matches any user home directory
     "/usr/bin/",
     "/usr/lib/",
     "/usr/share/",
     "/etc/systemd/",
     "/opt/",
-    "/home/cosmic/Projects/",
-    "/home/cosmic/Scripts/",
+    "/home/",
+    "/opt/jett/",
 ];
 
 // Trusted process names — instant ALLOW
@@ -351,7 +352,7 @@ fn main() {
                 println!("🚨 [SUSPICIOUS DETECTED] {} — sending to AI...", event.name);
                 
                 // Call jeTT binary for AI verdict
-                let output = Command::new("/home/cosmic/Projects/jeTT/target/release/jeTT")
+                let output = Command::new(std::env::var("JETT_BIN").unwrap_or_else(|_| format!("{}/Projects/jeTT/target/release/jeTT", std::env::var("HOME").unwrap_or_default())))
                     .arg("--guard")
                     .arg(&event_str)
                     .output();

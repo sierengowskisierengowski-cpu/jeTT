@@ -7,7 +7,7 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::sampling::LlamaSampler;
 
-const SYSTEM_CONTEXT: &str = "You are jeTT — autonomous AI Anti-Virus and Security for Joseph Sierengowski's GowskiNet lab on NyXxOS Arch Linux. You protect this system with zero tolerance for threats. ALWAYS ALLOW: bifrost, ollama, docker, systemd, cosmic-comp, meshtastic, gps-logger, cerberus, ghost-relay, cargo build, Govee scripts, rclone, Bambu printer, Flipper Zero, jeTT itself. ALWAYS QUARANTINE: execution from /tmp/, hidden dotfiles executing, unknown processes spawned by sshd at unusual hours, unexpected outbound connections after file downloads, privilege escalation attempts, processes reading /etc/shadow, crypto miners, reverse shells.";
+const SYSTEM_CONTEXT: &str = "You are jeTT — autonomous AI Anti-Virus and Security engine. You protect this system with zero tolerance for threats. ALWAYS ALLOW: bifrost, ollama, docker, systemd, cosmic-comp, meshtastic, gps-logger, cerberus, ghost-relay, cargo build, Govee scripts, rclone, Bambu printer, Flipper Zero, jeTT itself. ALWAYS QUARANTINE: execution from /tmp/, hidden dotfiles executing, unknown processes spawned by sshd at unusual hours, unexpected outbound connections after file downloads, privilege escalation attempts, processes reading /etc/shadow, crypto miners, reverse shells.";
 
 fn clean_output(raw: &str) -> String {
     raw
@@ -66,7 +66,8 @@ fn guard(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<Stri
         event
     );
     // Pre-check: trusted paths always ALLOW before model inference
-    let trusted_paths = ["/home/cosmic/", "/usr/", "/etc/systemd/", "/opt/"];
+    let home = std::env::var("HOME").unwrap_or_default();
+    let trusted_paths = [home.as_str(), "/usr/", "/etc/systemd/", "/opt/"];
     for path in &trusted_paths {
         if event.contains(path) {
             let t = Instant::now();
@@ -75,7 +76,8 @@ fn guard(model: &LlamaModel, backend: &LlamaBackend, event: &str) -> Result<Stri
         }
     }
     // Pre-check: trusted paths always ALLOW before model inference
-    let trusted_paths = ["/home/cosmic/", "/usr/", "/etc/systemd/", "/opt/"];
+    let home = std::env::var("HOME").unwrap_or_default();
+    let trusted_paths = [home.as_str(), "/usr/", "/etc/systemd/", "/opt/"];
     for path in &trusted_paths {
         if event.contains(path) {
             let t = Instant::now();
@@ -142,7 +144,7 @@ fn query(model: &LlamaModel, backend: &LlamaBackend, question: &str) -> Result<(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let model_path = PathBuf::from("/home/cosmic/Projects/jeTT/models/jeTT-r3-q4.gguf");
+    let model_path = PathBuf::from(std::env::var("JETT_MODEL").unwrap_or_else(|_| format!("{}/Projects/jeTT/models/jeTT-r3-q4.gguf", std::env::var("HOME").unwrap_or_default())));
     if !model_path.exists() {
         return Err(format!("Model not found: {:?}", model_path).into());
     }
@@ -168,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // TEST 3 — Gray area
     println!("\n--- TEST 3: Gray Area ---");
-    guard(&model, &backend, "python3 PID:3301 running govee-art.sh from /home/cosmic/Scripts/utilities/ time:23:30 uid:1000")?;
+    guard(&model, &backend, &format!("python3 PID:3301 running govee-art.sh from {}/Scripts/utilities/ time:23:30 uid:1000", std::env::var("HOME").unwrap_or_default()))?;
 
     // TEST 4 — Alert mode
     println!("\n--- TEST 4: Alert Mode ---");
