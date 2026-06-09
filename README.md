@@ -30,9 +30,9 @@ Traditional EDRs rely on cloud agents and continuous network access. jeTT flips 
 
 ## Install
 
-    curl -fsSL https://raw.githubusercontent.com/sierengowskisierengowski-cpu/jeTT/main/install.sh | sudo bash
+    curl -fsSLO https://raw.githubusercontent.com/sierengowskisierengowski-cpu/jeTT/main/install.sh && less install.sh && sudo bash install.sh
 
-    yay -S jett
+    yay -S jett   # after the AUR package is published
 
 ## Build
 

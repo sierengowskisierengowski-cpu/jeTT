@@ -146,7 +146,8 @@ log "Downloading daemon"
 DAEMON_FILE="${TMP_DIR}/daemon-asset"
 curl -fL "${DAEMON_URL}" -o "${DAEMON_FILE}"
 
-install -d "${INSTALL_BIN_DIR}" "${INSTALL_LIB_DIR}" "/var/log/jett" "/var/jett/quarantine"
+install -d -m 0755 "${INSTALL_BIN_DIR}" "${INSTALL_LIB_DIR}"
+install -d -m 0750 "/var/log/jett" "/var/jett/quarantine"
 extract_binary "${ENGINE_FILE}" '(^|/)jett$|(^|/)jett-.*|(^|/)jeTT$' "${INSTALL_LIB_DIR}/jeTT"
 extract_binary "${DAEMON_FILE}" '(^|/)jett-daemon$|(^|/)jett-daemon-.*' "${INSTALL_BIN_DIR}/jett-daemon"
 
@@ -156,12 +157,14 @@ SERVICE_SOURCE="${SCRIPT_DIR}/jett-daemon.service"
 
 if [[ ! -f "${WRAPPER_SOURCE}" ]]; then
   WRAPPER_SOURCE="${TMP_DIR}/jett"
-  curl -fsSL "https://raw.githubusercontent.com/${REPO}/${TAG}/jett" -o "${WRAPPER_SOURCE}" || die "Unable to fetch jett wrapper script"
+  WRAPPER_URL="https://raw.githubusercontent.com/${REPO}/${TAG}/jett"
+  curl -fsSL "${WRAPPER_URL}" -o "${WRAPPER_SOURCE}" || die "Unable to fetch jett wrapper script from ${WRAPPER_URL}"
 fi
 
 if [[ ! -f "${SERVICE_SOURCE}" ]]; then
   SERVICE_SOURCE="${TMP_DIR}/jett-daemon.service"
-  curl -fsSL "https://raw.githubusercontent.com/${REPO}/${TAG}/jett-daemon.service" -o "${SERVICE_SOURCE}" || die "Unable to fetch jett-daemon.service"
+  SERVICE_URL="https://raw.githubusercontent.com/${REPO}/${TAG}/jett-daemon.service"
+  curl -fsSL "${SERVICE_URL}" -o "${SERVICE_SOURCE}" || die "Unable to fetch jett-daemon.service from ${SERVICE_URL}"
 fi
 
 install -Dm755 "${WRAPPER_SOURCE}" "${INSTALL_BIN_DIR}/jett"

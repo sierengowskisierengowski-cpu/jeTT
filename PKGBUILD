@@ -13,7 +13,9 @@ source=(
   "jett"
   "jett-daemon.service"
 )
-sha256sums=('SKIP' 'SKIP' 'SKIP')
+sha256sums=('SKIP'
+            'b8d3762fd90062f4ff5afafc2529ef12a40b7ca8e3a2b418c39cf221b3c79634'
+            '0e5b5f34236637bd204684172a079894de5323e844ad54ad614dcfc175dfa8c9')
 
 build() {
   cd "${srcdir}/jeTT-${pkgver}"
@@ -27,6 +29,4 @@ package() {
   install -Dm755 "target/release/jett-daemon" "${pkgdir}/usr/bin/jett-daemon"
   install -Dm755 "${srcdir}/jett" "${pkgdir}/usr/bin/jett"
   install -Dm644 "${srcdir}/jett-daemon.service" "${pkgdir}/usr/lib/systemd/system/jett-daemon.service"
-
-  install -d "${pkgdir}/var/log/jett" "${pkgdir}/var/jett/quarantine"
 }

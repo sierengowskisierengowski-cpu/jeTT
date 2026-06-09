@@ -6,8 +6,7 @@ After=network.target
 Type=simple
 EnvironmentFile=-/etc/default/jett
 Environment=JETT_MODEL=/opt/jett/models/jeTT-q4.gguf
-Environment=JETT_BIN=jett
-ExecStart=/usr/bin/env jett-daemon
+ExecStart=/bin/sh -c 'if [ -x /usr/local/bin/jett-daemon ]; then exec /usr/local/bin/jett-daemon; else exec /usr/bin/jett-daemon; fi'
 Restart=on-failure
 RestartSec=5
 
