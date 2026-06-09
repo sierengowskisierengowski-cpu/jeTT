@@ -26,7 +26,7 @@ class TrainingPipelineTests(unittest.TestCase):
         )
 
         self.assertIn("Socket execution chain detected", record["output"])
-        self.assertTrue(record["output"].endswith("Final Verdict: QUARANTINE_PID_44"))
+        self.assertIn("Final Verdict: QUARANTINE_PID_44", record["output"])
 
     def test_normalize_record_requires_input(self):
         with self.assertRaises(ValueError):

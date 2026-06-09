@@ -26,11 +26,11 @@ def get_training_system_prompt():
 
 
 
-def normalize_training_record(item, record_label="training record"):
+def normalize_training_record(item, record_context="training record"):
     input_text = item.get("input")
     available_keys = ", ".join(sorted(item.keys())) or "<none>"
     if not input_text:
-        raise ValueError(f"{record_label} is missing required 'input' (keys: {available_keys})")
+        raise ValueError(f"{record_context} is missing required 'input' (keys: {available_keys})")
 
     output_text = item.get("output")
     if output_text:
@@ -55,7 +55,7 @@ def normalize_training_record(item, record_label="training record"):
         return normalized
 
     raise ValueError(
-        f"{record_label} must contain either 'output' or 'verdict'+'reasoning' (keys: {available_keys})"
+        f"{record_context} must contain either 'output' or 'verdict'+'reasoning' (keys: {available_keys})"
     )
 
 
@@ -64,7 +64,7 @@ def load_training_records(path):
     with open(path, "r") as handle:
         raw_data = json.load(handle)
     return [
-        normalize_training_record(item, record_label=f"training record #{index}")
+        normalize_training_record(item, record_context=f"training record #{index}")
         for index, item in enumerate(raw_data)
     ]
 

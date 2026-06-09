@@ -18,6 +18,7 @@ const QUARANTINE_DIR: &str = "/var/jett/quarantine";
 const VERSION: &str = "1.0.0";
 const DEFAULT_BRAND_MODEL: &str = "IBM Granite 3.3 2B";
 const DEFAULT_BRAND_HARDWARE: &str = "RTX 3060";
+const BANNER_CONTENT_WIDTH: usize = 39;
 const LOG_WRITE_LIMIT_PER_SECOND: u32 = 100;
 
 // Trusted paths — instant ALLOW, no AI needed
@@ -184,6 +185,14 @@ fn get_env_or_default(key: &str, default: &str) -> String {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default.to_string())
+}
+
+fn print_banner_line(content: &str) {
+    let mut rendered = content.to_string();
+    if rendered.chars().count() > BANNER_CONTENT_WIDTH {
+        rendered = rendered.chars().take(BANNER_CONTENT_WIDTH).collect();
+    }
+    println!("║ {:<39} ║", rendered);
 }
 
 fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
@@ -545,13 +554,13 @@ fn cleanup_dead_pids(seen_pids: &Arc<Mutex<HashSet<u32>>>) {
 
 fn main() {
     println!("╔═══════════════════════════════════════════╗");
-    println!("║   jeTT Daemon v{}                       ║", VERSION);
-    println!("║   GowskiNet AI Security Monitor           ║");
-    println!(
-        "║   {} — {}           ║",
+    print_banner_line(&format!("jeTT Daemon v{}", VERSION));
+    print_banner_line("GowskiNet AI Security Monitor");
+    print_banner_line(&format!(
+        "{} — {}",
         get_env_or_default("JETT_BRAND_MODEL", DEFAULT_BRAND_MODEL),
         get_env_or_default("JETT_BRAND_HARDWARE", DEFAULT_BRAND_HARDWARE),
-    );
+    ));
     println!("╚═══════════════════════════════════════════╝");
     println!();
 

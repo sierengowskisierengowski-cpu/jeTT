@@ -3,12 +3,21 @@ use std::time::Instant;
 
 const DEFAULT_BRAND_MODEL: &str = "IBM Granite 3.3 2B";
 const DEFAULT_BRAND_HARDWARE: &str = "RTX 3060";
+const BANNER_CONTENT_WIDTH: usize = 35;
 
 fn get_env_or_default(key: &str, default: &str) -> String {
     std::env::var(key)
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default.to_string())
+}
+
+fn print_banner_line(content: &str) {
+    let mut rendered = content.to_string();
+    if rendered.chars().count() > BANNER_CONTENT_WIDTH {
+        rendered = rendered.chars().take(BANNER_CONTENT_WIDTH).collect();
+    }
+    println!("║ {:<35} ║", rendered);
 }
 
 use llama_cpp_2::context::params::LlamaContextParams;
@@ -242,13 +251,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         RunMode::Demo => {
             println!("╔═══════════════════════════════════════╗");
-            println!("║     jeTT — AI Anti-Virus & Security   ║");
-            println!(
-                "║     {} — {}     ║",
+            print_banner_line("jeTT — AI Anti-Virus & Security");
+            print_banner_line(&format!(
+                "{} — {}",
                 get_env_or_default("JETT_BRAND_MODEL", DEFAULT_BRAND_MODEL),
                 get_env_or_default("JETT_BRAND_HARDWARE", DEFAULT_BRAND_HARDWARE),
-            );
-            println!("║     GowskiNet Security Lab             ║");
+            ));
+            print_banner_line("GowskiNet Security Lab");
             println!("╚═══════════════════════════════════════╝");
             println!();
 
