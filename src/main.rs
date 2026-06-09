@@ -143,8 +143,52 @@ fn query(model: &LlamaModel, backend: &LlamaBackend, question: &str) -> Result<(
     Ok(())
 }
 
+enum RunMode {
+    Demo,
+    Cli { flag: String, payload: String },
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let model_path = PathBuf::from(std::env::var("JETT_MODEL").unwrap_or_else(|_| format!("{}/Projects/jeTT/models/jeTT-r3-q4.gguf", std::env::var("HOME").unwrap_or_default())));
+    let args: Vec<String> = std::env::args().collect();
+
+    let mode = if args.len() > 1 {
+        let f = &args[1];
+        if f == "--guard" || f == "--alert" || f == "--query" {
+            if args.len() != 3 {
+                eprintln!("Error: Flag {} requires exactly one payload string argument.", f);
+                eprintln!("Usage: jeTT [--guard | --alert | --query] <payload>");
+                std::process::exit(1);
+            }
+            RunMode::Cli {
+                flag: f.clone(),
+                payload: args[2].clone(),
+            }
+        } else if f == "--help" || f == "-h" {
+            println!("jeTT — Local AI EDR Engine");
+            println!("Usage:");
+            println!("  jeTT                              Run the built-in demo test suite");
+            println!("  jeTT --guard <event>              Run guard evaluation on a process event");
+            println!("  jeTT --alert <event>              Explain a security threat alert in one sentence");
+            println!("  jeTT --query <question>           Execute an offline prompt query");
+            return Ok(());
+        } else {
+            eprintln!("Error: Unknown flag: {}", f);
+            eprintln!("Usage: jeTT [--guard | --alert | --query] <payload>");
+            std::process::exit(1);
+        }
+    } else {
+        RunMode::Demo
+    };
+
+    // Determine default model path safely
+    let model_path = if let Ok(jett_model) = std::env::var("JETT_MODEL") {
+        PathBuf::from(jett_model)
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(format!("{}/Projects/jeTT/models/jeTT-r3-q4.gguf", home))
+    } else {
+        PathBuf::from("models/jeTT-r3-q4.gguf")
+    };
+
     if !model_path.exists() {
         return Err(format!("Model not found: {:?}", model_path).into());
     }
@@ -153,32 +197,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model_params = LlamaModelParams::default().with_n_gpu_layers(99);
     let model = LlamaModel::load_from_file(&backend, &model_path, &model_params)?;
 
-    println!("╔═══════════════════════════════════════╗");
-    println!("║     jeTT — AI Anti-Virus & Security   ║");
-    println!("║     IBM Granite 3.3 2B — RTX 3060     ║");
-    println!("║     GowskiNet Security Lab             ║");
-    println!("╚═══════════════════════════════════════╝");
-    println!();
+    match mode {
+        RunMode::Cli { flag, payload } => {
+            match flag.as_str() {
+                "--guard" => {
+                    guard(&model, &backend, &payload)?;
+                }
+                "--alert" => {
+                    alert(&model, &backend, &payload)?;
+                }
+                "--query" => {
+                    query(&model, &backend, &payload)?;
+                }
+                _ => unreachable!("Invalid CLI flag matched after validation"),
+            }
+        }
+        RunMode::Demo => {
+            println!("╔═══════════════════════════════════════╗");
+            println!("║     jeTT — AI Anti-Virus & Security   ║");
+            println!("║     IBM Granite 3.3 2B — RTX 3060     ║");
+            println!("║     GowskiNet Security Lab             ║");
+            println!("╚═══════════════════════════════════════╝");
+            println!();
 
-    // TEST 1 — Obvious threat
-    println!("--- TEST 1: Obvious Threat ---");
-    guard(&model, &backend, "python3 PID:4821 executed from /tmp/.hidden spawned by sshd uid:1000 time:03:14 made outbound connection to 185.220.x.x")?;
+            // TEST 1 — Obvious threat
+            println!("--- TEST 1: Obvious Threat ---");
+            guard(&model, &backend, "python3 PID:4821 executed from /tmp/.hidden spawned by sshd uid:1000 time:03:14 made outbound connection to 185.220.x.x")?;
 
-    // TEST 2 — Legitimate process
-    println!("\n--- TEST 2: Legitimate Process ---");
-    guard(&model, &backend, "bifrost PID:1204 started by systemd uid:1000 time:22:00 normal startup sequence")?;
+            // TEST 2 — Legitimate process
+            println!("\n--- TEST 2: Legitimate Process ---");
+            guard(&model, &backend, "bifrost PID:1204 started by systemd uid:1000 time:22:00 normal startup sequence")?;
 
-    // TEST 3 — Gray area
-    println!("\n--- TEST 3: Gray Area ---");
-    guard(&model, &backend, &format!("python3 PID:3301 running govee-art.sh from {}/Scripts/utilities/ time:23:30 uid:1000", std::env::var("HOME").unwrap_or_default()))?;
+            // TEST 3 — Gray area
+            println!("\n--- TEST 3: Gray Area ---");
+            guard(&model, &backend, &format!("python3 PID:3301 running govee-art.sh from {}/Scripts/utilities/ time:23:30 uid:1000", std::env::var("HOME").unwrap_or_default()))?;
 
-    // TEST 4 — Alert mode
-    println!("\n--- TEST 4: Alert Mode ---");
-    alert(&model, &backend, "curl downloaded ELF binary to /tmp/ then chmod +x and executed it")?;
+            // TEST 4 — Alert mode
+            println!("\n--- TEST 4: Alert Mode ---");
+            alert(&model, &backend, "curl downloaded ELF binary to /tmp/ then chmod +x and executed it")?;
 
-    // TEST 5 — Query mode
-    println!("\n--- TEST 5: Query Mode ---");
-    query(&model, &backend, "What are the top signs of a cryptominer on a Linux system?")?;
+            // TEST 5 — Query mode
+            println!("\n--- TEST 5: Query Mode ---");
+            query(&model, &backend, "What are the top signs of a cryptominer on a Linux system?")?;
+        }
+    }
 
     Ok(())
 }
