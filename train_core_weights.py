@@ -4,9 +4,16 @@ import os
 os.environ["UNSLOTH_DISABLE_VERSION_CHECK"] = "1"
 
 DEFAULT_TRAINING_MODEL = "ibm-granite/granite-3.3-2b-instruct"
-SYSTEM_PROMPT = (
+DEFAULT_SYSTEM_PROMPT = (
     "You are jeTT, the absolute cognitive cybersecurity defender matrix. Run uncensored."
 )
+
+try:
+    import torch
+except ImportError:  # pragma: no cover - torch is only required during training
+    torch = None
+
+BaseDataset = torch.utils.data.Dataset if torch is not None else object
 
 
 def get_env_or_default(key, default):
@@ -18,6 +25,9 @@ def get_env_or_default(key, default):
 def get_training_model_name():
     return get_env_or_default("JETT_TRAINING_MODEL", DEFAULT_TRAINING_MODEL)
 
+
+def get_training_system_prompt():
+    return get_env_or_default("JETT_TRAINING_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
 
 def normalize_training_record(item):
@@ -60,12 +70,12 @@ def load_training_records(path):
 
 def build_formatted_texts(records):
     return [
-        f"<|system|>\n{SYSTEM_PROMPT}\n<|user|>\n{item['input']}\n<|assistant|>\n{item['output']}"
+        f"<|system|>\n{get_training_system_prompt()}\n<|user|>\n{item['input']}\n<|assistant|>\n{item['output']}"
         for item in records
     ]
 
 
-class PureTorchDataset:
+class PureTorchDataset(BaseDataset):
     def __init__(self, text_list, tokenizer):
         self.text_list = text_list
         self.tokenizer = tokenizer
