@@ -10,7 +10,7 @@ DEFAULT_SYSTEM_PROMPT = (
 
 try:
     import torch
-except ImportError:  # pragma: no cover - torch is only required during training
+except ImportError:  # pragma: no cover - PyTorch is only required during training
     torch = None
 
 BaseDataset = torch.utils.data.Dataset if torch is not None else object
@@ -30,10 +30,11 @@ def get_training_system_prompt():
     return get_env_or_default("JETT_TRAINING_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
 
-def normalize_training_record(item):
+def normalize_training_record(item, record_label="training record"):
     input_text = item.get("input")
+    available_keys = ", ".join(sorted(item.keys())) or "<none>"
     if not input_text:
-        raise ValueError("Training record is missing required 'input'")
+        raise ValueError(f"{record_label} is missing required 'input' (keys: {available_keys})")
 
     output_text = item.get("output")
     if output_text:
@@ -57,14 +58,19 @@ def normalize_training_record(item):
             normalized["instruction"] = item["instruction"]
         return normalized
 
-    raise ValueError("Training record must contain either 'output' or 'verdict'+'reasoning'")
+    raise ValueError(
+        f"{record_label} must contain either 'output' or 'verdict'+'reasoning' (keys: {available_keys})"
+    )
 
 
 
 def load_training_records(path):
     with open(path, "r") as handle:
         raw_data = json.load(handle)
-    return [normalize_training_record(item) for item in raw_data]
+    return [
+        normalize_training_record(item, record_label=f"training record #{index}")
+        for index, item in enumerate(raw_data)
+    ]
 
 
 
@@ -75,7 +81,7 @@ def build_formatted_texts(records):
     ]
 
 
-class PureTorchDataset(BaseDataset):
+class FormattedTrainingDataset(BaseDataset):
     def __init__(self, text_list, tokenizer):
         self.text_list = text_list
         self.tokenizer = tokenizer
@@ -134,7 +140,7 @@ def main():
 
     print("[🧬 RE-TOKENIZING] Formatting raw JSON blocks straight into text sequences...")
     formatted_texts = build_formatted_texts(raw_data)
-    dataset = PureTorchDataset(formatted_texts, tokenizer)
+    dataset = FormattedTrainingDataset(formatted_texts, tokenizer)
 
     print("[🔥 LOOPPASS INITIALIZED] Beginning neural calculation epochs across your dataset...")
     trainer = SFTTrainer(
