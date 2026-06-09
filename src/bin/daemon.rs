@@ -353,7 +353,7 @@ fn main() {
                 println!("🚨 [SUSPICIOUS DETECTED] {} — sending to AI...", event.name);
                 
                 // Call jeTT binary for AI verdict
-                let output = Command::new(std::env::var("JETT_BIN").unwrap_or_else(|_| format!("{}/Projects/jeTT/target/release/jeTT", std::env::var("HOME").unwrap_or_default())))
+                let output = Command::new(std::env::var("JETT_BIN").unwrap_or_else(|_| "jett".to_string()))
                     .arg("--guard")
                     .arg(&event_str)
                     .output();

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+resolve_engine_bin() {
+  if [[ -n "${JETT_ENGINE_BIN:-}" ]]; then
+    printf '%s\n' "${JETT_ENGINE_BIN}"
+    return
+  fi
+
+  if [[ -x "/usr/lib/jett/jeTT" ]]; then
+    printf '%s\n' "/usr/lib/jett/jeTT"
+  else
+    printf '%s\n' "/usr/local/lib/jett/jeTT"
+  fi
+}
+
+ENGINE_BIN="$(resolve_engine_bin)"
+CONTROL_PANEL_BIN="${JETT_CONTROL_PANEL_BIN:-$ENGINE_BIN}"
+
+if [[ $# -eq 0 ]]; then
+  exec "${CONTROL_PANEL_BIN}"
+fi
+
+exec "${ENGINE_BIN}" "$@"

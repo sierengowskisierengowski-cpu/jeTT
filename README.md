@@ -28,6 +28,12 @@ Traditional EDRs rely on cloud agents and continuous network access. jeTT flips 
 - Rust 2021 toolchain
 - libnccl
 
+## Install
+
+    curl -fsSL https://raw.githubusercontent.com/sierengowskisierengowski-cpu/jeTT/main/install.sh | sudo bash
+
+    yay -S jett
+
 ## Build
 
     git clone https://github.com/sierengowskisierengowski-cpu/jeTT
