@@ -612,6 +612,16 @@ fn main() {
         }
     };
 
+    // Safety mode: "learn" (default) logs would-kills WITHOUT killing.
+    // "enforce" actually kills. Default is learn — you opt INTO enforcement.
+    let enforce_mode = std::env::var("JETT_MODE")
+        .map(|m| m.eq_ignore_ascii_case("enforce"))
+        .unwrap_or(false);
+    if enforce_mode {
+        println!("[\u{26a0}] ENFORCE MODE — jeTT WILL kill quarantined processes");
+    } else {
+        println!("[\u{1f6e1}] LEARN MODE — jeTT logs would-kills but does NOT kill (set JETT_MODE=enforce to enable killing)");
+    }
     println!("[✅] jeTT daemon started — watching /proc for new processes");
     println!("[*] Logs: {}", LOG_DIR);
     println!("[*] Quarantine: {}", QUARANTINE_DIR);
@@ -669,9 +679,14 @@ fn main() {
                     // The trained model is the trigger — not the path heuristic.
                     let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
                     let verdict_label = if model_says_quarantine {
-                        println!("🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})", event.pid, event.name);
-                        quarantine_process(&event);
-                        "🚨 QUARANTINE".to_string()
+                        if enforce_mode {
+                            println!("🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})", event.pid, event.name);
+                            quarantine_process(&event);
+                            "🚨 QUARANTINE".to_string()
+                        } else {
+                            println!("🟡 [LEARN MODE] WOULD quarantine PID {} ({}) — not killing", event.pid, event.name);
+                            "🟡 WOULD-QUARANTINE".to_string()
+                        }
                     } else {
                         println!("✅ [AI VERDICT: ALLOW] {} cleared by model", event.name);
                         "✅ ALLOW".to_string()
