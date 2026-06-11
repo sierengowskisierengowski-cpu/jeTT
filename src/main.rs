@@ -26,6 +26,97 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel, Special};
 use llama_cpp_2::sampling::LlamaSampler;
+use sha2::{Digest, Sha256};
+use std::io::Write as _IoWrite;
+
+fn allowlist_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    format!("{}/.config/jett/allowlist.txt", home)
+}
+
+fn hash_file(path: &str) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let digest = hasher.finalize();
+    Some(digest.iter().map(|b| format!("{:02x}", b)).collect::<String>())
+}
+
+fn load_allowlist() -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    if let Ok(text) = std::fs::read_to_string(allowlist_path()) {
+        for line in text.lines() {
+            let h = line.trim();
+            if !h.is_empty() && !h.starts_with('#') {
+                if let Some(hash) = h.split_whitespace().next() {
+                    set.insert(hash.to_string());
+                }
+            }
+        }
+    }
+    set
+}
+
+fn trust_binary(path: &str) {
+    let Some(hash) = hash_file(path) else {
+        eprintln!("[!] Could not read/hash: {}", path);
+        std::process::exit(1);
+    };
+    let ap = allowlist_path();
+    if let Some(parent) = std::path::Path::new(&ap).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let existing = load_allowlist();
+    if existing.contains(&hash) {
+        println!("Already trusted: {} ({})", path, &hash[..16]);
+        return;
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&ap) {
+        let _ = writeln!(f, "{}  {}", hash, path);
+        println!("Trusted: {}", path);
+        println!("   SHA-256: {}", hash);
+    } else {
+        eprintln!("[!] Could not write allowlist at {}", ap);
+        std::process::exit(1);
+    }
+}
+
+fn untrust_binary(path: &str) {
+    let Some(hash) = hash_file(path) else {
+        eprintln!("[!] Could not read/hash: {}", path);
+        std::process::exit(1);
+    };
+    let ap = allowlist_path();
+    let Ok(text) = std::fs::read_to_string(&ap) else {
+        println!("Allowlist is empty.");
+        return;
+    };
+    let kept: Vec<String> = text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with(&hash))
+        .map(|l| l.to_string())
+        .collect();
+    let _ = std::fs::write(&ap, kept.join("
+") + "
+");
+    println!("Untrusted: {} ({})", path, &hash[..16]);
+}
+
+fn list_trusted() {
+    match std::fs::read_to_string(allowlist_path()) {
+        Ok(text) if !text.trim().is_empty() => {
+            println!("jeTT trusted binaries:");
+            for line in text.lines() {
+                let l = line.trim();
+                if !l.is_empty() && !l.starts_with('#') {
+                    println!("  {}", l);
+                }
+            }
+        }
+        _ => println!("No trusted binaries yet. Add one: jett --trust /path/to/binary"),
+    }
+}
+
 
 const SYSTEM_CONTEXT: &str = "You are jeTT — autonomous AI Anti-Virus and Security engine. You protect this system with zero tolerance for threats. ALWAYS ALLOW: bifrost, ollama, docker, systemd, cosmic-comp, meshtastic, gps-logger, cerberus, ghost-relay, cargo build, Govee scripts, rclone, Bambu printer, Flipper Zero, jeTT itself. ALWAYS QUARANTINE: execution from /tmp/, hidden dotfiles executing, unknown processes spawned by sshd at unusual hours, unexpected outbound connections after file downloads, privilege escalation attempts, processes reading /etc/shadow, crypto miners, reverse shells.";
 
@@ -114,6 +205,16 @@ fn guard(
             return Ok("ALLOW".to_string());
         }
     }
+    // Hash-based allowlist: a binary trusted by SHA-256 is allowed no matter
+    // where it runs from. Path can be faked; the hash cannot.
+    if !exe_path.is_empty() {
+        if let Some(hash) = hash_file(exe_path) {
+            if load_allowlist().contains(&hash) {
+                println!("\u{1f6e1}\u{fe0f}  GUARD  \u{2192} \u{2705} ALLOW | raw: TRUSTED_HASH (0ms)");
+                return Ok("ALLOW".to_string());
+            }
+        }
+    }
     let t = Instant::now();
     let result = infer(model, backend, &prompt, 25)?;
     let verdict = if result.to_uppercase().contains("QUARANTINE")
@@ -194,6 +295,33 @@ enum RunMode {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+
+    // Allowlist management commands — handled before loading the model.
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "--trust" => {
+                if args.len() != 3 {
+                    eprintln!("Usage: jett --trust /path/to/binary");
+                    std::process::exit(1);
+                }
+                trust_binary(&args[2]);
+                return Ok(());
+            }
+            "--untrust" => {
+                if args.len() != 3 {
+                    eprintln!("Usage: jett --untrust /path/to/binary");
+                    std::process::exit(1);
+                }
+                untrust_binary(&args[2]);
+                return Ok(());
+            }
+            "--list-trusted" => {
+                list_trusted();
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
 
     let mode = if args.len() > 1 {
         let f = &args[1];

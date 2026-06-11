@@ -551,7 +551,12 @@ fn scan_new_processes(seen_pids: &Arc<Mutex<HashSet<u32>>>) -> Vec<ProcessEvent>
 
         match read_proc_info(pid) {
             Ok(event) => new_events.push(event),
-            Err(ProcReadError::Read { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            // Silently skip processes we can't read — short-lived (NotFound)
+            // or root-owned (PermissionDenied). Neither is actionable noise.
+            Err(ProcReadError::Read { source, .. })
+                if source.kind() == io::ErrorKind::NotFound
+                    || source.kind() == io::ErrorKind::PermissionDenied =>
+            {
             }
             Err(error) => eprintln!("[!] {}", error),
         }
