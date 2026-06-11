@@ -199,33 +199,49 @@ pub fn guard(
     }
     let t = Instant::now();
     let result = infer(model, backend, &prompt, 25)?;
-    let verdict = if result.to_uppercase().contains("QUARANTINE")
-        || result.to_uppercase().contains("MALICIOUS")
-        || result.to_uppercase().contains("SUSPICIOUS")
-        || result.to_uppercase().contains("HIGH-RISK")
-        || result.to_uppercase().contains("THREAT")
-        || result.to_uppercase().contains("TARGET HOST")
-        || result.to_uppercase().contains("OUTBOUND CONNECTION")
-        || result.to_uppercase().contains("ANOMALOUS")
-        || result.to_uppercase().contains("EXECUTION PATH")
+    let up = result.to_uppercase();
+    let verdict = if up.contains("QUARANTINE")
+        || up.contains("MALICIOUS")
+        || up.contains("SUSPICIOUS")
+        || up.contains("HIGH-RISK")
+        || up.contains("THREAT")
+        || up.contains("TARGET HOST")
+        || up.contains("OUTBOUND CONNECTION")
+        || up.contains("ANOMALOUS")
+        || up.contains("EXECUTION PATH")
+        || up.contains("SHELLCODE")
+        || up.contains("INJECTION")
+        || up.contains("MINER")
+        || up.contains("CRYPTO")
+        || up.contains("REVERSE SHELL")
+        || up.contains("EXPLOIT")
+        || up.contains("BACKDOOR")
+        || up.contains("ROOTKIT")
+        || up.contains("PAYLOAD")
+        || up.contains("PRIVILEGE ESCALATION")
+        || up.contains("UNAUTHORIZED")
+        || up.contains("POLYMORPHIC")
+        || up.contains("OBFUSCAT")
+        || up.contains("C2")
+        || up.contains("EXFILTRAT")
     {
         format!("🚨 QUARANTINE")
-    } else if result.to_uppercase().contains("AUTHORIZED")
-        || result.to_uppercase().contains("LEGITIMATE")
-        || result.to_uppercase().contains("TRUSTED")
-        || result.to_uppercase().contains("ALLOW")
-        || result.to_uppercase().contains("NORMAL")
-        || result.to_uppercase().contains("NO MALICIOUS")
-        || result.to_uppercase().contains("GOWSKINET")
-        || result.to_uppercase().contains("BOOT SEQUENCE")
-        || result.to_uppercase().contains("NATIVE LINUX")
-        || result.to_uppercase().contains("AUTHORIZED ADMIN")
-        || result.to_uppercase().contains("SAFE")
-        || result.to_uppercase().contains("SCRIPTS")
-        || result.to_uppercase().contains("UTILITIES")
-        || result.to_uppercase().contains("/HOME/COSMIC")
-        || result.to_uppercase().contains("USER DIRECTORY")
-        || result.to_uppercase().contains("NON-STANDARD USER")
+    } else if up.contains("AUTHORIZED")
+        || up.contains("LEGITIMATE")
+        || up.contains("TRUSTED")
+        || up.contains("ALLOW")
+        || up.contains("NORMAL")
+        || up.contains("NO MALICIOUS")
+        || up.contains("GOWSKINET")
+        || up.contains("BOOT SEQUENCE")
+        || up.contains("NATIVE LINUX")
+        || up.contains("AUTHORIZED ADMIN")
+        || up.contains("SAFE")
+        || up.contains("SCRIPTS")
+        || up.contains("UTILITIES")
+        || up.contains("/HOME/COSMIC")
+        || up.contains("USER DIRECTORY")
+        || up.contains("NON-STANDARD USER")
     {
         format!("✅ ALLOW")
     } else {
@@ -237,7 +253,10 @@ pub fn guard(
         result,
         t.elapsed().as_millis()
     );
-    Ok(result)
+    // Return verdict + reasoning together: the verdict word ("QUARANTINE"/
+    // "ALLOW"/"REVIEW") drives the daemon's kill decision, while the model's
+    // reasoning is preserved for the forensic log.
+    Ok(format!("{} | {}", verdict, result))
 }
 
 pub fn alert(
