@@ -86,22 +86,30 @@ fn guard(
         "You are jeTT, the GowskiNet AI cybersecurity engine.\n\n[EVENT] {}\n\nREQUIRED TACTICAL VERDICT:\nAnalysis Matrix:\n- Pattern Recognition:",
         event
     );
-    // Pre-check: trusted paths always ALLOW before model inference
+    // Pre-check: ONLY trust immutable system paths + known toolchain dirs.
+    // $HOME is deliberately NOT blanket-trusted — it is attacker-writable.
+    // SECURITY: we extract ONLY the real exe path and match it as a PREFIX.
+    // We do NOT substring-match the whole event — that let an attacker
+    // whitelist malware just by putting "/usr/" anywhere in an argument.
     let home = std::env::var("HOME").unwrap_or_default();
-    let trusted_paths = [home.as_str(), "/usr/", "/etc/systemd/", "/opt/"];
-    for path in &trusted_paths {
-        if event.contains(path) {
-            let t = Instant::now();
-            println!("🛡️  GUARD  → ✅ ALLOW | raw: TRUSTED_PATH (0ms)");
-            return Ok("ALLOW".to_string());
-        }
-    }
-    // Pre-check: trusted paths always ALLOW before model inference
-    let home = std::env::var("HOME").unwrap_or_default();
-    let trusted_paths = [home.as_str(), "/usr/", "/etc/systemd/", "/opt/"];
-    for path in &trusted_paths {
-        if event.contains(path) {
-            let t = Instant::now();
+    let cargo_dir = format!("{}/.cargo/", home);
+    let rustup_dir = format!("{}/.rustup/", home);
+    let trusted_prefixes = [
+        "/usr/",
+        "/etc/systemd/",
+        "/opt/",
+        cargo_dir.as_str(),
+        rustup_dir.as_str(),
+    ];
+    // Pull out just the exe path from "...exe:/real/path cmd:..."
+    let exe_path = event
+        .split("exe:")
+        .nth(1)
+        .and_then(|s| s.split(" cmd:").next())
+        .unwrap_or("")
+        .trim();
+    for prefix in &trusted_prefixes {
+        if exe_path.starts_with(prefix) {
             println!("🛡️  GUARD  → ✅ ALLOW | raw: TRUSTED_PATH (0ms)");
             return Ok("ALLOW".to_string());
         }

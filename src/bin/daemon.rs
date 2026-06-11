@@ -67,15 +67,28 @@ const TRUSTED_PROCS: &[&str] = &[
 // Suspicious indicators — immediate flag for AI analysis
 const SUSPICIOUS_LITERALS: &[&str] = &[
     "/tmp/.",
+    "/tmp/",
     "/dev/shm/",
+    "/var/tmp/",
+    "/.cache/",
+    "/Downloads/",
     "memfd_create",
     "/proc/self/mem",
     "ld_preload",
+    "LD_PRELOAD",
     "/etc/shadow",
     "/etc/passwd",
     "chmod +x /tmp",
+    "chmod +x /dev/shm",
     "nc -e",
+    "ncat -e",
+    "bash -i",
+    "/bin/sh -i",
     "insmod /tmp",
+    "curl",
+    "wget",
+    "base64 -d",
+    "/.ssh/authorized_keys",
 ];
 
 #[derive(Debug, Clone)]
@@ -634,10 +647,20 @@ fn main() {
                         }
                     };
 
-                    quarantine_process(&event);
+                    // GATE: only kill if the AI model actually returned QUARANTINE.
+                    // The trained model is the trigger — not the path heuristic.
+                    let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
+                    let verdict_label = if model_says_quarantine {
+                        println!("🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})", event.pid, event.name);
+                        quarantine_process(&event);
+                        "🚨 QUARANTINE".to_string()
+                    } else {
+                        println!("✅ [AI VERDICT: ALLOW] {} cleared by model", event.name);
+                        "✅ ALLOW".to_string()
+                    };
 
                     let verdict = JettVerdict {
-                        verdict: "🚨 QUARANTINE".to_string(),
+                        verdict: verdict_label,
                         reason,
                         elapsed_ms: t.elapsed().as_millis() as u64,
                         event,
