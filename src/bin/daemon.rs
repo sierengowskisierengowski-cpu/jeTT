@@ -6,6 +6,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use jeTT::engine::{load_model, guard as engine_guard, Engine};
 
 // ─────────────────────────────────────────────
 // jeTT Daemon — Real System Event Monitor
@@ -600,6 +601,16 @@ fn main() {
         eprintln!("[!] Model not found: {}", model_path);
         std::process::exit(1);
     }
+    let engine: Engine = match load_model(&model_path) {
+        Ok(e) => {
+            println!("[OK] Model loaded into VRAM - warm and ready (no per-event reload)");
+            e
+        }
+        Err(err) => {
+            eprintln!("[!] Failed to load model: {}", err);
+            std::process::exit(1);
+        }
+    };
 
     println!("[✅] jeTT daemon started — watching /proc for new processes");
     println!("[*] Logs: {}", LOG_DIR);
@@ -644,11 +655,13 @@ fn main() {
                     let event_str = format_event_for_ai(&event);
                     println!("🚨 [SUSPICIOUS DETECTED] {} — sending to AI...", event.name);
 
-                    let reason = match run_guard_subprocess(&event_str) {
+                    // Warm-model verdict: call the in-process model directly.
+                    // No subprocess, no 600ms reload — model stays in VRAM.
+                    let reason = match engine_guard(&engine.model, &engine.backend, &event_str) {
                         Ok(output) => output,
                         Err(error) => {
-                            eprintln!("[!] {}", error);
-                            error
+                            eprintln!("[!] guard inference failed: {}", error);
+                            format!("ERROR: {}", error)
                         }
                     };
 
