@@ -93,13 +93,13 @@ const SUSPICIOUS_LITERALS: &[&str] = &[
     "/.ssh/authorized_keys",
 ];
 
-#[derive(Debug, Clone)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EventSource {
     Proc,
     Ebpf,
 }
 
+#[derive(Debug, Clone)]
 struct ProcessEvent {
     pid: u32,
     name: String,

@@ -7,7 +7,11 @@ resolve_engine_bin() {
     return
   fi
 
-  if [[ -x "/usr/lib/jett/jeTT" ]]; then
+  local repo_root
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -x "${repo_root}/target/release/jeTT" ]]; then
+    printf '%s\n' "${repo_root}/target/release/jeTT"
+  elif [[ -x "/usr/lib/jett/jeTT" ]]; then
     printf '%s\n' "/usr/lib/jett/jeTT"
   else
     printf '%s\n' "/usr/local/lib/jett/jeTT"

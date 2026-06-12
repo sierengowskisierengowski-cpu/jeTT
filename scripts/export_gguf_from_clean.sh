@@ -7,7 +7,8 @@ source .venv/bin/activate
 
 ROUND="${1:-r6}"
 CLEAN="${JETT_CLEAN:-models/${ROUND}/clean}"
-BF16="${JETT_GGUF_BF16:-models/${ROUND}/jett-${ROUND}.BF16.gguf}"
+# Write BF16 to /tmp first — network FS on RunPod can stall mid-write on workspace.
+BF16="${JETT_GGUF_BF16:-/tmp/jett-${ROUND}.BF16.gguf}"
 OUT="${JETT_GGUF_OUT:-models/${ROUND}/jett-${ROUND}-q4_k_m.gguf}"
 
 if [[ ! -f "${CLEAN}/model.safetensors" && ! -f "${CLEAN}/pytorch_model.bin" ]]; then

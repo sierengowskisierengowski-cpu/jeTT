@@ -27,6 +27,7 @@ use jeTT::engine::{guard, alert, query, trust_binary, untrust_binary, list_trust
 enum RunMode {
     Demo,
     Cli { flag: String, payload: String },
+    GuardBatch,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -61,7 +62,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mode = if args.len() > 1 {
         let f = &args[1];
-        if f == "--guard" || f == "--alert" || f == "--query" {
+        if f == "--guard-batch" {
+            if args.len() != 2 {
+                eprintln!("Usage: jeTT --guard-batch  (reads event lines from stdin)");
+                std::process::exit(1);
+            }
+            RunMode::GuardBatch
+        } else if f == "--guard" || f == "--alert" || f == "--query" {
             if args.len() != 3 {
                 eprintln!(
                     "Error: Flag {} requires exactly one payload string argument.",
@@ -79,6 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Usage:");
             println!("  jeTT                              Run the built-in demo test suite");
             println!("  jeTT --guard <event>              Run guard evaluation on a process event");
+            println!("  jeTT --guard-batch                Read events from stdin (one model load; for eval)");
             println!("  jeTT --alert <event>              Explain a security threat alert in one sentence");
             println!("  jeTT --query <question>           Execute an offline prompt query");
             return Ok(());
@@ -110,6 +118,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut guard_ctx = new_guard_context(&engine)?;
 
     match mode {
+        RunMode::GuardBatch => {
+            use std::io::{self, BufRead, Write};
+            let stdin = io::stdin();
+            let mut stderr = io::stderr();
+            for line in stdin.lock().lines() {
+                let line = line?;
+                if line.is_empty() {
+                    continue;
+                }
+                if line == "__JETT_EVAL_QUIT__" {
+                    break;
+                }
+                guard(&mut guard_ctx, model, &line)?;
+                writeln!(stderr, "__JETT_EVAL_END__")?;
+                stderr.flush()?;
+            }
+        }
         RunMode::Cli { flag, payload } => match flag.as_str() {
             "--guard" => {
                 guard(&mut guard_ctx, model, &payload)?;

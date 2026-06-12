@@ -129,12 +129,15 @@ pub fn guard_max_tokens() -> i32 {
     std::env::var("JETT_GUARD_MAX_TOKENS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(2)
+        .unwrap_or(6)
 }
 
 pub fn new_guard_context(engine: &Engine) -> Result<LlamaContext<'_>, Box<dyn std::error::Error>> {
     let ctx_params = LlamaContextParams::default().with_n_ctx(
-        std::num::NonZeroU32::new(guard_n_ctx()).unwrap_or(std::num::NonZeroU32::MIN),
+        Some(
+            std::num::NonZeroU32::new(guard_n_ctx())
+                .unwrap_or(std::num::NonZeroU32::MIN),
+        ),
     );
     Ok(engine.model.new_context(&engine.backend, ctx_params)?)
 }
@@ -147,7 +150,7 @@ pub fn infer_on_context(
 ) -> Result<String, Box<dyn std::error::Error>> {
     ctx.clear_kv_cache();
     let tokens = model.str_to_token(prompt, AddBos::Always)?;
-    let n_batch = ctx.n_batch().min(512);
+    let n_batch = ctx.n_batch().min(512) as usize;
     let mut batch = LlamaBatch::new(n_batch, 1);
     let last = tokens.len().saturating_sub(1);
     for (i, token) in tokens.iter().enumerate() {
@@ -178,7 +181,9 @@ pub fn infer(
     prompt: &str,
     max_tokens: i32,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(std::num::NonZeroU32::new(4096));
+    let ctx_params = LlamaContextParams::default().with_n_ctx(Some(
+        std::num::NonZeroU32::new(4096).unwrap_or(std::num::NonZeroU32::MIN),
+    ));
     let mut ctx = model.new_context(backend, ctx_params)?;
     infer_on_context(&mut ctx, model, prompt, max_tokens)
 }
