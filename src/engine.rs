@@ -3,6 +3,7 @@ use std::time::Instant;
 // Single source of truth for model loading, inference, verdicts, allowlist.
 
 use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
@@ -117,17 +118,38 @@ pub fn clean_output(raw: &str) -> String {
         .to_string()
 }
 
-pub fn infer(
+pub fn guard_n_ctx() -> u32 {
+    std::env::var("JETT_N_CTX")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(512)
+}
+
+pub fn guard_max_tokens() -> i32 {
+    std::env::var("JETT_GUARD_MAX_TOKENS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2)
+}
+
+pub fn new_guard_context(engine: &Engine) -> Result<LlamaContext<'_>, Box<dyn std::error::Error>> {
+    let ctx_params = LlamaContextParams::default().with_n_ctx(
+        std::num::NonZeroU32::new(guard_n_ctx()).unwrap_or(std::num::NonZeroU32::MIN),
+    );
+    Ok(engine.model.new_context(&engine.backend, ctx_params)?)
+}
+
+pub fn infer_on_context(
+    ctx: &mut LlamaContext,
     model: &LlamaModel,
-    backend: &LlamaBackend,
     prompt: &str,
     max_tokens: i32,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(std::num::NonZeroU32::new(4096));
-    let mut ctx = model.new_context(backend, ctx_params)?;
+    ctx.clear_kv_cache();
     let tokens = model.str_to_token(prompt, AddBos::Always)?;
-    let mut batch = LlamaBatch::new(512, 1);
-    let last = tokens.len() - 1;
+    let n_batch = ctx.n_batch().min(512);
+    let mut batch = LlamaBatch::new(n_batch, 1);
+    let last = tokens.len().saturating_sub(1);
     for (i, token) in tokens.iter().enumerate() {
         batch.add(*token, i as i32, &[0], i == last)?;
     }
@@ -136,7 +158,7 @@ pub fn infer(
     let mut sampler = LlamaSampler::chain_simple([LlamaSampler::temp(0.1), LlamaSampler::greedy()]);
     let mut n_pos = tokens.len() as i32;
     for _ in 0..max_tokens {
-        let token = sampler.sample(&ctx, -1);
+        let token = sampler.sample(ctx, -1);
         if model.is_eog_token(token) {
             break;
         }
@@ -150,9 +172,20 @@ pub fn infer(
     Ok(clean_output(&output))
 }
 
-pub fn guard(
+pub fn infer(
     model: &LlamaModel,
     backend: &LlamaBackend,
+    prompt: &str,
+    max_tokens: i32,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let ctx_params = LlamaContextParams::default().with_n_ctx(std::num::NonZeroU32::new(4096));
+    let mut ctx = model.new_context(backend, ctx_params)?;
+    infer_on_context(&mut ctx, model, prompt, max_tokens)
+}
+
+pub fn guard(
+    ctx: &mut LlamaContext,
+    model: &LlamaModel,
     event: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = format!(
@@ -198,7 +231,7 @@ pub fn guard(
         }
     }
     let t = Instant::now();
-    let result = infer(model, backend, &prompt, 6)?;
+    let result = infer_on_context(ctx, model, &prompt, guard_max_tokens())?;
     let up = result.to_uppercase();
     let verdict = if up.contains("QUARANTINE")
         || up.contains("MALICIOUS")

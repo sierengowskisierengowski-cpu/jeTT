@@ -21,7 +21,7 @@ fn print_banner_line(content: &str) {
 }
 
 
-use jeTT::engine::{guard, alert, query, trust_binary, untrust_binary, list_trusted, load_model};
+use jeTT::engine::{guard, alert, query, trust_binary, untrust_binary, list_trusted, load_model, new_guard_context};
 
 
 enum RunMode {
@@ -107,11 +107,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = load_model(&model_path.to_string_lossy())?;
     let model = &engine.model;
     let backend = &engine.backend;
+    let mut guard_ctx = new_guard_context(&engine)?;
 
     match mode {
         RunMode::Cli { flag, payload } => match flag.as_str() {
             "--guard" => {
-                guard(model, backend, &payload)?;
+                guard(&mut guard_ctx, model, &payload)?;
             }
             "--alert" => {
                 alert(model, backend, &payload)?;
@@ -135,19 +136,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // TEST 1 — Obvious threat
             println!("--- TEST 1: Obvious Threat ---");
-            guard(model, backend, "python3 PID:4821 executed from /tmp/.hidden spawned by sshd uid:1000 time:03:14 made outbound connection to 185.220.x.x")?;
+            guard(&mut guard_ctx, model, "python3 PID:4821 executed from /tmp/.hidden spawned by sshd uid:1000 time:03:14 made outbound connection to 185.220.x.x")?;
 
             // TEST 2 — Legitimate process
             println!("\n--- TEST 2: Legitimate Process ---");
             guard(
+                &mut guard_ctx,
                 model,
-                backend,
                 "bifrost PID:1204 started by systemd uid:1000 time:22:00 normal startup sequence",
             )?;
 
             // TEST 3 — Gray area
             println!("\n--- TEST 3: Gray Area ---");
-            guard(model, backend, &format!("python3 PID:3301 running govee-art.sh from {}/Scripts/utilities/ time:23:30 uid:1000", std::env::var("HOME").unwrap_or_default()))?;
+            guard(&mut guard_ctx, model, &format!("python3 PID:3301 running govee-art.sh from {}/Scripts/utilities/ time:23:30 uid:1000", std::env::var("HOME").unwrap_or_default()))?;
 
             // TEST 4 — Alert mode
             println!("\n--- TEST 4: Alert Mode ---");

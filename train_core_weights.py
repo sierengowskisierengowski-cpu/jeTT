@@ -100,6 +100,12 @@ def main():
         type=int,
         default=int(os.getenv("JETT_TRAIN_GRAD_ACCUM", "16")),
     )
+    parser.add_argument(
+        "--skip-gguf",
+        action="store_true",
+        default=os.getenv("JETT_SKIP_GGUF", "").strip() in ("1", "true", "yes"),
+        help="Stop after LoRA checkpoint (use scripts/export_gguf_pod.sh on RunPod)",
+    )
     args = parser.parse_args()
 
     from unsloth import FastLanguageModel
@@ -192,6 +198,11 @@ def main():
     )
 
     trainer.train()
+
+    if args.skip_gguf:
+        ckpt = os.path.join(args.output_dir, f"checkpoint-{args.max_steps}")
+        print(f"[+] Training complete (GGUF skipped). Checkpoint: {ckpt}")
+        return
 
     merged_dir = os.path.join(args.gguf_dir, "merged")
     print(f"[🏆 MERGE] Fusing LoRA into 16-bit weights -> {merged_dir}")

@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use jeTT::engine::{load_model, guard as engine_guard, Engine};
+use jeTT::engine::{load_model, new_guard_context, guard as engine_guard, Engine};
 
 // ─────────────────────────────────────────────
 // jeTT Daemon — Real System Event Monitor
@@ -454,31 +454,13 @@ fn collect_children(pid: u32) -> Vec<String> {
     kids
 }
 
-/// Watch a process for a short window and build a behavior profile string.
-/// This is appended to the event before the model judges it.
-fn collect_behavior(pid: u32) -> String {
-    let mut all_conns: HashSet<String> = HashSet::new();
-    let mut all_files: HashSet<String> = HashSet::new();
-    let mut all_kids: HashSet<String> = HashSet::new();
+fn behavior_mode_snapshot() -> bool {
+    std::env::var("JETT_BEHAVIOR_MODE")
+        .map(|m| m.eq_ignore_ascii_case("snapshot"))
+        .unwrap_or(true)
+}
 
-    // Poll 3 times over ~1.5s to catch behavior that develops after launch.
-    for _ in 0..3 {
-        for c in collect_connections(pid) {
-            all_conns.insert(c);
-        }
-        for f in collect_open_files(pid) {
-            all_files.insert(f);
-        }
-        for k in collect_children(pid) {
-            all_kids.insert(k);
-        }
-        // If the process already exited, stop early.
-        if !Path::new(&format!("/proc/{}", pid)).exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(500));
-    }
-
+fn behavior_profile_from(all_conns: HashSet<String>, all_files: HashSet<String>, all_kids: HashSet<String>) -> String {
     let mut profile = String::new();
     if !all_conns.is_empty() {
         let mut v: Vec<String> = all_conns.into_iter().collect();
@@ -499,6 +481,47 @@ fn collect_behavior(pid: u32) -> String {
         profile.push_str(" behavior:none_observed");
     }
     profile
+}
+
+/// Watch a process and build a behavior profile string (appended before model judgment).
+/// Default: snapshot (single /proc read). Set JETT_BEHAVIOR_MODE=poll for ~1.5s window.
+fn collect_behavior(pid: u32) -> String {
+    let mut all_conns: HashSet<String> = HashSet::new();
+    let mut all_files: HashSet<String> = HashSet::new();
+    let mut all_kids: HashSet<String> = HashSet::new();
+
+    if behavior_mode_snapshot() {
+        for c in collect_connections(pid) {
+            all_conns.insert(c);
+        }
+        for f in collect_open_files(pid) {
+            all_files.insert(f);
+        }
+        for k in collect_children(pid) {
+            all_kids.insert(k);
+        }
+        return behavior_profile_from(all_conns, all_files, all_kids);
+    }
+
+    // Poll 3 times over ~1.5s to catch behavior that develops after launch.
+    for _ in 0..3 {
+        for c in collect_connections(pid) {
+            all_conns.insert(c);
+        }
+        for f in collect_open_files(pid) {
+            all_files.insert(f);
+        }
+        for k in collect_children(pid) {
+            all_kids.insert(k);
+        }
+        // If the process already exited, stop early.
+        if !Path::new(&format!("/proc/{}", pid)).exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+
+    behavior_profile_from(all_conns, all_files, all_kids)
 }
 
 fn format_event_for_ai(event: &ProcessEvent) -> String {
@@ -767,6 +790,21 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let mut guard_ctx = match new_guard_context(&engine) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            eprintln!("[!] Failed to create guard context: {}", err);
+            std::process::exit(1);
+        }
+    };
+    let behavior_mode = if behavior_mode_snapshot() {
+        "snapshot"
+    } else {
+        "poll"
+    };
+    println!("[*] Guard context: n_ctx={} behavior={}", 
+        std::env::var("JETT_N_CTX").unwrap_or_else(|_| "512".into()),
+        behavior_mode);
 
     // Safety mode: "learn" (default) logs would-kills WITHOUT killing.
     // "enforce" actually kills. Default is learn — you opt INTO enforcement.
@@ -828,7 +866,7 @@ fn main() {
 
                     // Warm-model verdict: call the in-process model directly.
                     // No subprocess, no 600ms reload — model stays in VRAM.
-                    let reason = match engine_guard(&engine.model, &engine.backend, &event_str) {
+                    let reason = match engine_guard(&mut guard_ctx, &engine.model, &event_str) {
                         Ok(output) => output,
                         Err(error) => {
                             eprintln!("[!] guard inference failed: {}", error);

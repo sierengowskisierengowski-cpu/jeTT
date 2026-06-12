@@ -24,6 +24,7 @@ def main():
     ap.add_argument("--failures", default="data/eval_failures_r5.jsonl")
     ap.add_argument("--out", default="data/bucket_i_eval_reinforce.jsonl")
     ap.add_argument("--variants", type=int, default=3, help="variants per failure")
+    ap.add_argument("--round", default="", help="tag bucket rows, e.g. round7")
     args = ap.parse_args()
 
     src = Path(args.failures)
@@ -41,7 +42,11 @@ def main():
                 "bucket": row.get("bucket", "ambiguous"),
                 "category": row.get("category", "eval_reinforce"),
                 "mitre": row.get("mitre", []),
-                "tags": ["eval_reinforce", "round6"],
+                "tags": (
+                    [*row.get("tags", ["eval_reinforce"]), args.round]
+                    if args.round
+                    else row.get("tags", ["eval_reinforce"])
+                ),
                 "input": row["input"],
                 "output": row["output"],
                 "reasoning": row.get("reasoning", "Reinforced from eval miss."),
