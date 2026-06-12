@@ -1,12 +1,46 @@
+# ── Rust ─────────────────────────────────────────────────────────────────────
 target/
-*.gguf
-*.gz
-models/
-intelligence/
-knowledge_base/
-unsloth_compiled_cache/
+cmd/**/target/
+*.rlib
 
-# Generated training blobs (regenerate via scripts/)
+# ── Go ───────────────────────────────────────────────────────────────────────
+cmd/server/cerberus-tower
+*.exe
+*.test
+vendor/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.venv/
+venv/
+env/
+.env/
+pip-wheel-metadata/
+get-pip.py
+
+# ── eBPF / C build artifacts ─────────────────────────────────────────────────
+*.bpf.o
+*.o
+internal/kernel/vmlinux.h
+
+# ── Model files & weights ────────────────────────────────────────────────────
+models/
+*.gguf
+*.ggml
+*.bin
+*.safetensors
+*.pt
+*.pth
+unsloth_compiled_cache/
+outputs/
+lora_adapters/
+
+# ── Generated training data (regenerate via training/ scripts) ───────────────
+data/
+jett_training_data.json
 jett_training_data_full.json
 jett_round2_training.json
 jett_round3_training.json
@@ -16,19 +50,32 @@ jett_kb_training.json
 jett_allow_training.json
 jett_brain_rules.txt
 jett_training_upload.zip
-data/
+jett_*_training.json
+jett_*_training.json.gz
 
-get-pip.py
-__pycache__/
-*.pyc
+# ── Intel / knowledge base downloads (regenerate via training/intel/ scripts) ─
+intelligence/
+knowledge_base/
 
-# Merge/refactor scratch (use src/bin/daemon.rs as canonical)
+# ── Archives ─────────────────────────────────────────────────────────────────
+*.gz
+*.tar
+*.zip
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Refactor / merge scratch ──────────────────────────────────────────────────
 *.premerge
 *.backup
 jett_daemon.rs
-download_intelligence (1).py
-internal/kernel/vmlinux.h
-*.bpf.o
-cmd/**/target/
-models/*.gguf
-cmd/server/cerberus-tower

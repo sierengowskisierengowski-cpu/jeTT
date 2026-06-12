@@ -22,7 +22,7 @@ bash scripts/run_round7_pipeline.sh
 
 echo ""
 echo "[2/4] Sync repo + datasets to pod (excludes large GGUFs)..."
-$SSH "mkdir -p $REMOTE/data $REMOTE/models $REMOTE/outputs $REMOTE/scripts $REMOTE/coverage $REMOTE/tests"
+$SSH "mkdir -p $REMOTE/data $REMOTE/models $REMOTE/outputs $REMOTE/scripts $REMOTE/training/coverage $REMOTE/tests"
 rsync -az --progress \
   -e "$RSYNC_SSH" \
   --no-owner --no-group \
@@ -44,7 +44,7 @@ rsync -az --progress \
   --exclude 'get-pip.py' \
   --exclude 'cmd/agent/target/' \
   --exclude 'bpf/*.o' \
-  scripts/ src/ train_core_weights.py eval_guard.py stratified_merge.py generate_*.py coverage/ tests/guard_eval*.jsonl docs/EBPF.md \
+  scripts/ src/ training/ tests/guard_eval*.jsonl docs/EBPF.md \
   "$USER@$HOST:$REMOTE/"
 
 # Training JSON + eval (small, required)
