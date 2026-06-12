@@ -3,7 +3,10 @@ target/
 *.gz
 models/
 intelligence/
+knowledge_base/
 unsloth_compiled_cache/
+
+# Generated training blobs (regenerate via scripts/)
 jett_training_data_full.json
 jett_round2_training.json
 jett_round3_training.json
@@ -13,6 +16,14 @@ jett_kb_training.json
 jett_allow_training.json
 jett_brain_rules.txt
 jett_training_upload.zip
+data/
+
 get-pip.py
 __pycache__/
 *.pyc
+
+# Merge/refactor scratch (use src/bin/daemon.rs as canonical)
+*.premerge
+*.backup
+jett_daemon.rs
+download_intelligence (1).py

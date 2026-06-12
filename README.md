@@ -8,6 +8,8 @@ Cerberus is a Linux XDR (Extended Detection and Response) platform built around 
 
 This repository currently contains the local Rust prototype that powers the CLI, daemon, and model-driven verdict path used for Cerberus development.
 
+**jeTT** is the name of the runtime in this repo: the `jeTT` CLI, `jett-daemon`, `src/engine.rs`, and training generators. Cerberus is the broader XDR platform; jeTT is the on-box AI EDR brain.
+
 ## Repository contents
 
 - Rust inference binary with `--guard`, `--alert`, and `--query`

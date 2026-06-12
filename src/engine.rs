@@ -156,7 +156,7 @@ pub fn guard(
     event: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = format!(
-        "You are jeTT, the GowskiNet AI cybersecurity engine.\n\n[EVENT] {}\n\nREQUIRED TACTICAL VERDICT:\nAnalysis Matrix:\n- Pattern Recognition:",
+        "You are jeTT, a security classifier. Analyze this process event and respond with EXACTLY ONE WORD: either QUARANTINE (if malicious/suspicious) or ALLOW (if legitimate). Do not explain. Do not add detail.\n\n[EVENT] {}\n\nVERDICT:",
         event
     );
     // Pre-check: ONLY trust immutable system paths + known toolchain dirs.
@@ -198,7 +198,7 @@ pub fn guard(
         }
     }
     let t = Instant::now();
-    let result = infer(model, backend, &prompt, 25)?;
+    let result = infer(model, backend, &prompt, 6)?;
     let up = result.to_uppercase();
     let verdict = if up.contains("QUARANTINE")
         || up.contains("MALICIOUS")
@@ -247,16 +247,75 @@ pub fn guard(
     } else {
         format!("⚠️  REVIEW")
     };
+    // Build the human-readable reason from the REAL behavioral facts in the
+    // event — NOT from the model's prose. The model decides (verdict); our
+    // code explains using ground truth we actually collected. This makes every
+    // logged reason factually true and eliminates hallucinated explanations.
+    let reason = build_factual_reason(event, &verdict);
     println!(
-        "🛡️  GUARD  → {} | raw: {} ({}ms)",
+        "🛡️  GUARD  → {} | {} ({}ms)",
         verdict,
-        result,
+        reason,
         t.elapsed().as_millis()
     );
-    // Return verdict + reasoning together: the verdict word ("QUARANTINE"/
-    // "ALLOW"/"REVIEW") drives the daemon's kill decision, while the model's
-    // reasoning is preserved for the forensic log.
-    Ok(format!("{} | {}", verdict, result))
+    // Return "VERDICT | factual-reason": verdict drives the kill decision,
+    // the fact-based reason is logged for forensics.
+    Ok(format!("{} | {}", verdict, reason))
+}
+
+/// Build a factual reason string from the actual event data, not model prose.
+/// Pulls the real behavioral signals the daemon collected and the launch path.
+fn build_factual_reason(event: &str, verdict: &str) -> String {
+    let mut facts: Vec<String> = Vec::new();
+
+    // Extract the launch path
+    if let Some(after) = event.split("exe:").nth(1) {
+        if let Some(path) = after.split(" cmd:").next() {
+            let p = path.trim();
+            if p.starts_with("/tmp/") || p.contains("/.cache/")
+                || p.starts_with("/var/tmp/") || p.contains("/Downloads/")
+                || p.starts_with("/dev/shm/") {
+                facts.push(format!("executed from suspicious path {}", p));
+            }
+        }
+    }
+
+    // Extract real outbound connections (collected from /proc)
+    if let Some(after) = event.split("outbound_connections:[").nth(1) {
+        if let Some(conns) = after.split(']').next() {
+            if !conns.is_empty() {
+                facts.push(format!("outbound connections to [{}]", conns));
+            }
+        }
+    }
+
+    // Extract real sensitive file access
+    if let Some(after) = event.split("sensitive_files:[").nth(1) {
+        if let Some(files) = after.split(']').next() {
+            if !files.is_empty() {
+                facts.push(format!("accessed sensitive files [{}]", files));
+            }
+        }
+    }
+
+    // Extract real spawned children
+    if let Some(after) = event.split("spawned_children:[").nth(1) {
+        if let Some(kids) = after.split(']').next() {
+            if !kids.is_empty() {
+                facts.push(format!("spawned child processes [{}]", kids));
+            }
+        }
+    }
+
+    if facts.is_empty() {
+        if verdict.contains("QUARANTINE") {
+            "flagged by model on launch profile".to_string()
+        } else {
+            "no suspicious behavior observed".to_string()
+        }
+    } else {
+        facts.join("; ")
+    }
 }
 
 pub fn alert(

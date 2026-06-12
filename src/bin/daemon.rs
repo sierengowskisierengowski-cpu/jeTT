@@ -349,6 +349,158 @@ fn is_suspicious(event: &ProcessEvent) -> bool {
     false
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// BEHAVIORAL ANALYSIS
+// Watch what a process actually DOES, not just how it launched.
+// Reads /proc/PID/ for ~1.5s and builds a behavior profile string.
+// This is the difference between "a binary started in /tmp" and
+// "a binary started in /tmp, connected to 185.x.x.x, read /etc/shadow,
+//  spawned bash, and pegged the CPU."
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Parse a hex IP:port from /proc/PID/net/tcp into a readable string.
+/// The kernel stores addresses little-endian hex, e.g. "0100007F:1F90".
+fn parse_hex_addr(hex: &str) -> Option<String> {
+    let parts: Vec<&str> = hex.split(':').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let ip_hex = parts[0];
+    let port_hex = parts[1];
+    if ip_hex.len() != 8 {
+        return None;
+    }
+    // IP bytes are reversed (little-endian)
+    let b1 = u8::from_str_radix(&ip_hex[6..8], 16).ok()?;
+    let b2 = u8::from_str_radix(&ip_hex[4..6], 16).ok()?;
+    let b3 = u8::from_str_radix(&ip_hex[2..4], 16).ok()?;
+    let b4 = u8::from_str_radix(&ip_hex[0..2], 16).ok()?;
+    let port = u16::from_str_radix(port_hex, 16).ok()?;
+    Some(format!("{}.{}.{}.{}:{}", b1, b2, b3, b4, port))
+}
+
+/// Read outbound TCP connections for a PID from /proc/PID/net/tcp.
+/// State "01" = ESTABLISHED. We report the remote (destination) address.
+fn collect_connections(pid: u32) -> Vec<String> {
+    let mut conns = Vec::new();
+    for proto in &["tcp", "tcp6"] {
+        let path = format!("/proc/{}/net/{}", pid, proto);
+        if let Ok(text) = fs::read_to_string(&path) {
+            for line in text.lines().skip(1) {
+                let cols: Vec<&str> = line.split_whitespace().collect();
+                // col 2 = remote addr, col 3 = connection state
+                if cols.len() > 3 {
+                    let state = cols[3];
+                    // 01 = ESTABLISHED, 02 = SYN_SENT (actively connecting out)
+                    if state == "01" || state == "02" {
+                        if let Some(addr) = parse_hex_addr(cols[2]) {
+                            // Skip loopback / unspecified
+                            if !addr.starts_with("127.") && !addr.starts_with("0.0.0.0") {
+                                conns.push(addr);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    conns.sort();
+    conns.dedup();
+    conns
+}
+
+/// Read open file descriptors for a PID from /proc/PID/fd/.
+/// Returns paths the process currently has open, flagging sensitive ones.
+fn collect_open_files(pid: u32) -> Vec<String> {
+    let mut files = Vec::new();
+    let fd_dir = format!("/proc/{}/fd", pid);
+    if let Ok(entries) = fs::read_dir(&fd_dir) {
+        for entry in entries.flatten() {
+            if let Ok(target) = fs::read_link(entry.path()) {
+                let p = target.to_string_lossy().to_string();
+                // Only report real files in sensitive/interesting locations
+                if p.starts_with("/etc/")
+                    || p.contains("/.ssh/")
+                    || p.starts_with("/root/")
+                    || p.contains("shadow")
+                    || p.contains("passwd")
+                    || p.starts_with("/var/spool/cron")
+                    || p.contains("/cron.d/")
+                {
+                    files.push(p);
+                }
+            }
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// Read child PIDs spawned by this process from /proc/PID/task/PID/children.
+fn collect_children(pid: u32) -> Vec<String> {
+    let mut kids = Vec::new();
+    let path = format!("/proc/{}/task/{}/children", pid, pid);
+    if let Ok(text) = fs::read_to_string(&path) {
+        for child_pid in text.split_whitespace() {
+            // Read the child's name from its comm
+            if let Ok(name) = fs::read_to_string(format!("/proc/{}/comm", child_pid)) {
+                kids.push(name.trim().to_string());
+            }
+        }
+    }
+    kids.sort();
+    kids.dedup();
+    kids
+}
+
+/// Watch a process for a short window and build a behavior profile string.
+/// This is appended to the event before the model judges it.
+fn collect_behavior(pid: u32) -> String {
+    let mut all_conns: HashSet<String> = HashSet::new();
+    let mut all_files: HashSet<String> = HashSet::new();
+    let mut all_kids: HashSet<String> = HashSet::new();
+
+    // Poll 3 times over ~1.5s to catch behavior that develops after launch.
+    for _ in 0..3 {
+        for c in collect_connections(pid) {
+            all_conns.insert(c);
+        }
+        for f in collect_open_files(pid) {
+            all_files.insert(f);
+        }
+        for k in collect_children(pid) {
+            all_kids.insert(k);
+        }
+        // If the process already exited, stop early.
+        if !Path::new(&format!("/proc/{}", pid)).exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+
+    let mut profile = String::new();
+    if !all_conns.is_empty() {
+        let mut v: Vec<String> = all_conns.into_iter().collect();
+        v.sort();
+        profile.push_str(&format!(" outbound_connections:[{}]", v.join(",")));
+    }
+    if !all_files.is_empty() {
+        let mut v: Vec<String> = all_files.into_iter().collect();
+        v.sort();
+        profile.push_str(&format!(" sensitive_files:[{}]", v.join(",")));
+    }
+    if !all_kids.is_empty() {
+        let mut v: Vec<String> = all_kids.into_iter().collect();
+        v.sort();
+        profile.push_str(&format!(" spawned_children:[{}]", v.join(",")));
+    }
+    if profile.is_empty() {
+        profile.push_str(" behavior:none_observed");
+    }
+    profile
+}
+
 fn format_event_for_ai(event: &ProcessEvent) -> String {
     format!(
         "{} PID:{} uid:{} exe:{} cmd:{} time:{}",
@@ -666,8 +818,13 @@ fn main() {
                     }
                 }
                 ProcessDisposition::Suspicious => {
-                    let event_str = format_event_for_ai(&event);
-                    println!("🚨 [SUSPICIOUS DETECTED] {} — sending to AI...", event.name);
+                    println!("🚨 [SUSPICIOUS DETECTED] {} — profiling behavior...", event.name);
+                    // BEHAVIORAL ANALYSIS: watch what the process actually does
+                    // (network, sensitive files, child processes) before judging.
+                    let behavior = collect_behavior(event.pid);
+                    let event_str = format!("{}{}", format_event_for_ai(&event), behavior);
+                    println!("🔬 [BEHAVIOR]{}", behavior);
+                    println!("🧠 [SENDING TO AI] {}", event.name);
 
                     // Warm-model verdict: call the in-process model directly.
                     // No subprocess, no 600ms reload — model stays in VRAM.
