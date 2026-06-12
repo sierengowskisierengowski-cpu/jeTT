@@ -335,6 +335,62 @@ TEMPLATES = [
         tags=["reads_proc", "hardware_query"],
         reasoning="GPU status query; reads driver/proc info, no network, fully benign.",
     ),
+
+    # --- Round 5 widen: gaming / VPN / containers / desktop apps -------------
+    dict(
+        name="flatpak", exe="/usr/bin/flatpak", cmds=["update --appstream", "install flathub com.valvesoftware.Steam"],
+        uid=1000, category="desktop_apps",
+        conns=_conns(BENIGN_IPS, 1, 2),
+        kids=lambda: ["bwrap", "xdg-dbus-proxy"][: random.randint(1, 2)],
+        mitre=["T1072"],
+        tags=["outbound", "sandbox_spawn", "package_fetch"],
+        reasoning="Flatpak pulling app updates from Flathub; sandbox children are expected.",
+    ),
+    dict(
+        name="steam", exe="/home/cosmic/.local/share/Steam/ubuntu12_64/steam",
+        cmds=["-silent", "-applaunch 730"], uid=1000, category="desktop_apps",
+        conns=_conns(BENIGN_IPS, 1, 3),
+        kids=lambda: ["steamwebhelper", "GameOverlayUI"][: random.randint(1, 2)],
+        mitre=["T1071.001"],
+        tags=["outbound", "many_children", "gaming"],
+        reasoning="Steam client with web helper children and CDN outbound; normal gaming session.",
+    ),
+    dict(
+        name="wg-quick", exe="/usr/bin/wg-quick", cmds=["up wg0", "down wg0"],
+        uid=0, category="network_vpn",
+        files=lambda: ["/etc/wireguard/wg0.conf"],
+        conns=lambda: [f"{random.choice(LAN_IPS)}:51820"],
+        mitre=["T1071"],
+        tags=["root_uid", "tun_interface", "outbound_udp"],
+        reasoning="WireGuard VPN bring-up reading wg config; root + outbound is normal for wg-quick.",
+    ),
+    dict(
+        name="kubectl", exe="/usr/bin/kubectl", cmds=["apply -f deployment.yaml", "port-forward svc/api 8443:443"],
+        uid=1000, category="containers",
+        conns=lambda: [f"{random.choice(LAN_IPS)}:6443"],
+        kids=lambda: ["kubectl"] if random.random() < 0.3 else None,
+        mitre=["T1072", "T1021"],
+        tags=["k8s_api", "outbound_lan", "orchestration"],
+        reasoning="kubectl talking to cluster API and port-forwarding; devops workflow on LAN.",
+    ),
+    dict(
+        name="docker", exe="/usr/bin/docker", cmds=["compose up -d", "run --rm -it archlinux"],
+        uid=1000, category="containers",
+        kids=lambda: random.sample(["containerd-shim", "runc", "docker-proxy"], k=2),
+        conns=_conns(BENIGN_IPS, 0, 1),
+        mitre=["T1610"],
+        tags=["spawns_containers", "outbound_optional"],
+        reasoning="Docker compose bringing up stacks; containerd children are expected.",
+    ),
+    dict(
+        name="obs", exe="/usr/bin/obs", cmds=["--startreplaybuffer", ""],
+        uid=1000, category="desktop_apps",
+        kids=lambda: ["obs-ffmpeg-mux"] if random.random() < 0.5 else None,
+        files=lambda: ["/home/cosmic/Videos"] if random.random() < 0.3 else None,
+        mitre=["T1059"],
+        tags=["screen_capture", "writes_videos"],
+        reasoning="OBS recording desktop; spawns ffmpeg mux and writes to Videos.",
+    ),
 ]
 
 
