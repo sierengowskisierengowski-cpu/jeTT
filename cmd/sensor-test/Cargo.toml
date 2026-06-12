@@ -1,0 +1,9 @@
+[package]
+name = "jett-sensor-test"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 1 eBPF smoke test — prints sched_process_exec events"
+
+[dependencies]
+libbpf-rs = "0.24"
+libc = "0.2"

@@ -27,17 +27,21 @@ fi
 
 echo ""
 echo "========== jeTT train round=${ROUND} steps=${STEPS} =========="
-echo "[train] $(date -Is) data=$DATA -> $CKPT"
 
-python train_core_weights.py \
-  --data "$JETT_TRAINING_DATA" \
-  --max-steps "$JETT_TRAIN_MAX_STEPS" \
-  --batch-size "$JETT_TRAIN_BATCH" \
-  --grad-accum "$JETT_TRAIN_GRAD_ACCUM" \
-  --output-dir "$JETT_OUTPUT_DIR" \
-  --gguf-dir "$JETT_GGUF_DIR" \
-  --skip-gguf \
-  2>&1 | tee -a "$LOG"
+if [[ -d "$CKPT" && "${JETT_FORCE:-0}" != "1" ]]; then
+  echo "[skip-train] $(date -Is) checkpoint exists: $CKPT (set JETT_FORCE=1 to retrain)"
+else
+  echo "[train] $(date -Is) data=$DATA -> $CKPT"
+  python train_core_weights.py \
+    --data "$JETT_TRAINING_DATA" \
+    --max-steps "$JETT_TRAIN_MAX_STEPS" \
+    --batch-size "$JETT_TRAIN_BATCH" \
+    --grad-accum "$JETT_TRAIN_GRAD_ACCUM" \
+    --output-dir "$JETT_OUTPUT_DIR" \
+    --gguf-dir "$JETT_GGUF_DIR" \
+    --skip-gguf \
+    2>&1 | tee -a "$LOG"
+fi
 
 export JETT_CHECKPOINT="$CKPT"
 export JETT_CLEAN="${JETT_GGUF_DIR}/clean"
