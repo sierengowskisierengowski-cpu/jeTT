@@ -3,6 +3,7 @@
 set -euo pipefail
 cd /workspace/jett
 source .venv/bin/activate
+export HF_HOME="${HF_HOME:-/workspace/jett/.cache/hf}"
 
 CKPT="${JETT_CHECKPOINT:-outputs/r6/checkpoint-250}"
 CLEAN="${JETT_CLEAN:-models/r6/clean}"

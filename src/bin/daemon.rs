@@ -6,7 +6,8 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use jeTT::engine::{load_model, new_guard_context, guard as engine_guard, Engine};
+use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
+use jeTT::telemetry::{parse_telemetry_mode, telemetry_mode_label, TelemetryMode};
 
 // ─────────────────────────────────────────────
 // jeTT Daemon — Real System Event Monitor
@@ -93,6 +94,12 @@ const SUSPICIOUS_LITERALS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EventSource {
+    Proc,
+    Ebpf,
+}
+
 struct ProcessEvent {
     pid: u32,
     name: String,
@@ -100,6 +107,7 @@ struct ProcessEvent {
     exe_path: String,
     uid: u32,
     timestamp: u64,
+    source: EventSource,
 }
 
 #[derive(Debug)]
@@ -277,6 +285,7 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
         exe_path,
         uid,
         timestamp: get_timestamp(),
+        source: EventSource::Proc,
     })
 }
 
@@ -522,6 +531,47 @@ fn collect_behavior(pid: u32) -> String {
     }
 
     behavior_profile_from(all_conns, all_files, all_kids)
+}
+
+fn env_flag(name: &str, default_on: bool) -> bool {
+    std::env::var(name)
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(default_on)
+}
+
+fn capture_forensics(event: &ProcessEvent, event_str: &str, verdict: &str) {
+    if !env_flag("JETT_FORENSICS", true) {
+        return;
+    }
+    let dir = format!("{}/forensics", LOG_DIR);
+    if fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = format!(
+        "{}/{}_{}_{}.json",
+        dir,
+        event.pid,
+        event.timestamp,
+        event.name.replace('/', "_")
+    );
+    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let source = match event.source {
+        EventSource::Proc => "proc",
+        EventSource::Ebpf => "ebpf",
+    };
+    let payload = format!(
+        "{{\"pid\":{},\"uid\":{},\"name\":\"{}\",\"exe\":\"{}\",\"cmdline\":\"{}\",\"source\":\"{}\",\"event_str\":\"{}\",\"verdict\":\"{}\",\"ts\":{}}}",
+        event.pid,
+        event.uid,
+        esc(&event.name),
+        esc(&event.exe_path),
+        esc(&event.cmdline),
+        source,
+        esc(event_str),
+        esc(verdict),
+        event.timestamp
+    );
+    let _ = fs::write(path, payload);
 }
 
 fn format_event_for_ai(event: &ProcessEvent) -> String {
@@ -802,9 +852,20 @@ fn main() {
     } else {
         "poll"
     };
-    println!("[*] Guard context: n_ctx={} behavior={}", 
+    let telemetry = parse_telemetry_mode();
+    if matches!(telemetry, TelemetryMode::Ebpf | TelemetryMode::Both) {
+        println!(
+            "[*] JETT_TELEMETRY={} — eBPF ringbuf not wired yet; using /proc fallback",
+            telemetry_mode_label(telemetry)
+        );
+    } else {
+        println!("[*] JETT_TELEMETRY=proc");
+    }
+    println!(
+        "[*] Guard context: n_ctx={} behavior={}",
         std::env::var("JETT_N_CTX").unwrap_or_else(|_| "512".into()),
-        behavior_mode);
+        behavior_mode
+    );
 
     // Safety mode: "learn" (default) logs would-kills WITHOUT killing.
     // "enforce" actually kills. Default is learn — you opt INTO enforcement.
@@ -877,6 +938,12 @@ fn main() {
                     // GATE: only kill if the AI model actually returned QUARANTINE.
                     // The trained model is the trigger — not the path heuristic.
                     let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
+                    if model_says_quarantine {
+                        capture_forensics(&event, &event_str, &reason);
+                        if env_flag("JETT_ALERT_ON_QUARANTINE", true) {
+                            let _ = engine_alert(&engine.model, &engine.backend, &event_str);
+                        }
+                    }
                     let verdict_label = if model_says_quarantine {
                         if enforce_mode {
                             println!("🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})", event.pid, event.name);
@@ -932,6 +999,7 @@ mod tests {
             exe_path: exe_path.to_string(),
             uid: 1000,
             timestamp: 1,
+            source: EventSource::Proc,
         }
     }
 
