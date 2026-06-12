@@ -286,7 +286,11 @@ fn classify_event(event: &ProcessEvent) -> ProcessDisposition {
     } else if is_trusted(event) {
         ProcessDisposition::Trusted
     } else {
-        ProcessDisposition::Unknown
+                // Unknown binaries (neither trusted nor matching suspicious patterns)
+        // now escalate to the AI model rather than running unjudged.
+        // The hash-allowlist + trusted-path checks in guard() short-circuit
+        // the common cases, so only genuinely-unknown binaries hit inference.
+        ProcessDisposition::Suspicious
     }
 }
 
