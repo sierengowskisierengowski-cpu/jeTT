@@ -45,11 +45,16 @@ fi
 
 export JETT_CHECKPOINT="$CKPT"
 export JETT_CLEAN="${JETT_GGUF_DIR}/clean"
-export JETT_GGUF_BF16="${JETT_GGUF_DIR}/jett-${ROUND}.BF16.gguf"
+export JETT_GGUF_BF16="/tmp/jett-${ROUND}.BF16.gguf"
 export JETT_GGUF_OUT="$GGUF_OUT"
 
 echo "[export] $(date -Is) $CKPT -> $GGUF_OUT"
-bash scripts/export_gguf_pod.sh 2>&1 | tee -a "${LOG%.log}_export.log"
+if [[ -f "${JETT_GGUF_DIR}/clean/model.safetensors" || -f "${JETT_GGUF_DIR}/clean/pytorch_model.bin" ]]; then
+  bash scripts/export_gguf_from_clean.sh "$ROUND" 2>&1 | tee -a "${LOG%.log}_export.log"
+else
+  bash scripts/export_gguf_pod.sh 2>&1 | tee -a "${LOG%.log}_export.log"
+fi
+rm -f "/tmp/jett-${ROUND}.BF16.gguf"
 
 if [[ ! -f "$GGUF_OUT" ]]; then
   echo "[!] GGUF not found after export: $GGUF_OUT"

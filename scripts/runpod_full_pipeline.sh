@@ -23,6 +23,7 @@ if [[ -n "${JETT_ROUNDS:-}" ]]; then
       case "$r" in
         r6) echo "r6|data/jett_training_v6.json|models/r6/jett-r6-q4_k_m.gguf" ;;
         r7) echo "r7|data/jett_training_v7.json|models/r7/jett-r7-q4_k_m.gguf" ;;
+        r8) echo "r8|data/jett_training_v8.json|models/r8/jett-r8-q4_k_m.gguf" ;;
         *) echo "[!] unknown round $r" >&2; exit 1 ;;
       esac
     done
