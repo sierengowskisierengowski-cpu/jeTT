@@ -1,0 +1,12 @@
+[package]
+name = "cerberus-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libbpf-rs = "0.24"            # Direct safe bindings to the C eBPF ringbuffer
+tokio = { version = "1.0", features = ["full"] } # Async runtime for high throughput
+nix = { version = "0.28", features = ["process", "signal"] } # Low-level OS control primitives
+libc = "0.2"                  # Raw C types mapping
+reqwest = { version = "0.11", features = ["json"] } # High-speed local HTTP transport channel
+serde = { version = "1.0", features = ["derive"] } # Serializes memory structs into network JSON

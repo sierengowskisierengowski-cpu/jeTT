@@ -27,3 +27,8 @@ __pycache__/
 *.backup
 jett_daemon.rs
 download_intelligence (1).py
+internal/kernel/vmlinux.h
+*.bpf.o
+cmd/**/target/
+models/*.gguf
+cmd/server/cerberus-tower
