@@ -11,7 +11,7 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -p "$PORT")
 
 mkdir -p models
 
-for round in ${JETT_PULL_ROUNDS:-r6 r7 r8}; do
+for round in ${JETT_PULL_ROUNDS:-r6 r7 r8 r9 r10}; do
   remote="models/${round}/jett-${round}-q4_k_m.gguf"
   local="models/jett-${round}-q4_k_m.gguf"
   echo "[pull] $USER@$HOST:$REMOTE/$remote -> $local"

@@ -55,6 +55,24 @@ pub fn normalize_proc_name(name: &str) -> String {
         .to_string()
 }
 
+/// Parse `{comm} PID:… uid:… exe:{path} cmd:…` strings passed to `jeTT --guard`.
+pub fn parse_guard_event_fields(event: &str) -> (String, String) {
+    let comm = event
+        .split(" PID:")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    let exe_path = event
+        .split_once(" exe:")
+        .and_then(|(_, after_exe)| after_exe.split_once(" cmd:"))
+        .map(|(path, _)| path.trim().to_string())
+        .unwrap_or_default();
+
+    (comm, exe_path)
+}
+
 /// Prefer exe path basename; fall back to comm when path is empty or has no basename.
 pub fn proc_name_from_exe(exe_path: &str, fallback_comm: &str) -> String {
     Path::new(exe_path)
@@ -83,5 +101,13 @@ mod tests {
             "git-remote-https"
         );
         assert_eq!(proc_name_from_exe("", "rg"), "rg");
+    }
+
+    #[test]
+    fn parse_guard_event_fields_extracts_comm_and_exe() {
+        let event = "python3 PID:999 uid:1000 exe:/usr/bin/python3.14 cmd:python3 -c 'import socket' time:1 behavior:none_observed";
+        let (comm, exe) = parse_guard_event_fields(event);
+        assert_eq!(comm, "python3");
+        assert_eq!(exe, "/usr/bin/python3.14");
     }
 }

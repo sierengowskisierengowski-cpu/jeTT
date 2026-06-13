@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::event::normalize_proc_name;
+use super::event::{normalize_proc_name, parse_guard_event_fields};
 
 /// Shells, interpreters, downloaders, and privesc tools — shared by daemon + guard().
 pub const NEVER_FAST_TRUST: &[&str] = &[
@@ -38,13 +38,19 @@ pub fn matches_never_fast_trust(name: &str) -> bool {
     false
 }
 
+/// Mirror daemon `is_never_fast_trust`: check comm and full exe path before TRUSTED_PATH.
+pub fn guard_event_skips_fast_trust(event: &str) -> bool {
+    let (comm, exe_path) = parse_guard_event_fields(event);
+    matches_never_fast_trust(&comm) || matches_never_fast_trust(&exe_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn versioned_interpreters_match() {
-        for name in ["python3.13", "python3.12", "node22", "node20", "ruby3.3"] {
+        for name in ["python3.14", "python3.13", "python3.12", "node22", "node20", "ruby3.3"] {
             assert!(
                 matches_never_fast_trust(name),
                 "{name} should never fast-trust"
@@ -67,5 +73,14 @@ mod tests {
         assert!(matches_never_fast_trust("(python3)"));
         assert!(matches_never_fast_trust("/usr/bin/curl"));
         assert!(matches_never_fast_trust("wget"));
+    }
+
+    #[test]
+    fn guard_event_python314_skips_fast_trust() {
+        let event = "python3 PID:999 uid:1000 exe:/usr/bin/python3.14 cmd:python3 -c 'import socket' time:1 behavior:none_observed";
+        assert!(
+            guard_event_skips_fast_trust(event),
+            "versioned python exe under /usr must not TRUSTED_PATH bypass"
+        );
     }
 }

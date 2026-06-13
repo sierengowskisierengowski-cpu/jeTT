@@ -24,6 +24,8 @@ if [[ -n "${JETT_ROUNDS:-}" ]]; then
         r6) echo "r6|data/jett_training_v6.json|models/r6/jett-r6-q4_k_m.gguf" ;;
         r7) echo "r7|data/jett_training_v7.json|models/r7/jett-r7-q4_k_m.gguf" ;;
         r8) echo "r8|data/jett_training_v8.json|models/r8/jett-r8-q4_k_m.gguf" ;;
+        r9) echo "r9|data/jett_training_v9.json|models/r9/jett-r9-q4_k_m.gguf" ;;
+        r10) echo "r10|data/jett_training_v10.json|models/r10/jett-r10-q4_k_m.gguf" ;;
         *) echo "[!] unknown round $r" >&2; exit 1 ;;
       esac
     done
@@ -43,11 +45,23 @@ fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
-if ! python -c "import unsloth" 2>/dev/null; then
-  log "installing unsloth + deps (5-15 min)..."
-  pip install -q --upgrade pip
-  pip install -q "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" \
-    trl transformers datasets accelerate bitsandbytes pyyaml
+venv_ok() {
+  python - <<'PY' 2>/dev/null
+import torch
+from unsloth import FastLanguageModel
+assert torch.cuda.is_available()
+PY
+}
+
+if ! venv_ok; then
+  log "venv missing or broken — running scripts/runpod_setup_venv.sh"
+  bash scripts/runpod_setup_venv.sh 2>&1 | tee -a "$MAIN_LOG"
+  source .venv/bin/activate
+fi
+
+if ! venv_ok; then
+  log "FATAL: venv still broken after setup"
+  exit 1
 fi
 
 for spec in "${ROUND_SPECS[@]}"; do
