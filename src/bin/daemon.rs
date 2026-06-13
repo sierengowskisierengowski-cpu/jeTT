@@ -9,7 +9,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
 use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
 use jeTT::telemetry::{
-    parse_telemetry_mode, stat_inode, telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
+    normalize_proc_name, parse_telemetry_mode, stat_inode, telemetry_mode_label, EventSource,
+    ProcessEvent, TelemetryMode,
 };
 #[cfg(feature = "ebpf")]
 use jeTT::telemetry::{
@@ -208,14 +209,15 @@ fn print_banner_line(content: &str) {
 fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
     let proc_path = format!("/proc/{}", pid);
 
-    let name = fs::read_to_string(format!("{}/comm", proc_path))
-        .map_err(|source| ProcReadError::Read {
-            pid,
-            field: "comm",
-            source,
-        })?
-        .trim()
-        .to_string();
+    let name = normalize_proc_name(
+        &fs::read_to_string(format!("{}/comm", proc_path))
+            .map_err(|source| ProcReadError::Read {
+                pid,
+                field: "comm",
+                source,
+            })?
+            .trim(),
+    );
 
     if name.is_empty() {
         return Err(ProcReadError::MissingField { pid, field: "comm" });
@@ -660,6 +662,22 @@ fn profile_for_event(event: &ProcessEvent) -> String {
     }
 }
 
+fn verdict_label_for_reason(reason: &str, enforce_mode: bool) -> String {
+    if reason.starts_with("ERROR:") {
+        return "⚠️ REVIEW".to_string();
+    }
+    let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
+    if model_says_quarantine {
+        if enforce_mode {
+            "🚨 QUARANTINE".to_string()
+        } else {
+            "🟡 WOULD-QUARANTINE".to_string()
+        }
+    } else {
+        "✅ ALLOW".to_string()
+    }
+}
+
 fn finalize_ai_verdict(
     event: ProcessEvent,
     event_str: &str,
@@ -668,32 +686,48 @@ fn finalize_ai_verdict(
     engine: &Engine,
     started: Instant,
 ) -> JettVerdict {
+    if reason.starts_with("ERROR:") {
+        eprintln!(
+            "⚠️ [AI VERDICT: REVIEW] inference failed for {} — {}",
+            event.name, reason
+        );
+        return JettVerdict {
+            verdict: verdict_label_for_reason(&reason, enforce_mode),
+            reason,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            event,
+        };
+    }
+
     let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
     if model_says_quarantine {
         capture_forensics(&event, event_str, &reason);
-        if env_flag("JETT_ALERT_ON_QUARANTINE", true) {
+        if enforce_mode && env_flag("JETT_ALERT_ON_QUARANTINE", true) {
             let _ = engine_alert(&engine.model, &engine.backend, event_str);
+        } else if !enforce_mode {
+            eprintln!("[*] learn mode: skipping alert subprocess");
         }
     }
-    let verdict_label = if model_says_quarantine {
-        if enforce_mode {
+    let verdict_label = verdict_label_for_reason(&reason, enforce_mode);
+    match verdict_label.as_str() {
+        "🚨 QUARANTINE" => {
             println!(
                 "🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})",
                 event.pid, event.name
             );
             quarantine_process(&event);
-            "🚨 QUARANTINE".to_string()
-        } else {
+        }
+        "🟡 WOULD-QUARANTINE" => {
             println!(
                 "🟡 [LEARN MODE] WOULD quarantine PID {} ({}) — not killing",
                 event.pid, event.name
             );
-            "🟡 WOULD-QUARANTINE".to_string()
         }
-    } else {
-        println!("✅ [AI VERDICT: ALLOW] {} cleared by model", event.name);
-        "✅ ALLOW".to_string()
-    };
+        "✅ ALLOW" => {
+            println!("✅ [AI VERDICT: ALLOW] {} cleared by model", event.name);
+        }
+        _ => {}
+    }
 
     JettVerdict {
         verdict: verdict_label,
@@ -1167,5 +1201,28 @@ mod tests {
             validate_guard_output(true, b"ALLOW\n", b"").unwrap(),
             "ALLOW"
         );
+    }
+
+    #[test]
+    fn inference_error_verdict_is_review_not_allow() {
+        assert_eq!(
+            verdict_label_for_reason("ERROR: NoKvCacheSlot", false),
+            "⚠️ REVIEW"
+        );
+        assert_eq!(
+            verdict_label_for_reason("ERROR: Insufficient Space of 512", true),
+            "⚠️ REVIEW"
+        );
+        assert_eq!(
+            verdict_label_for_reason("🚨 QUARANTINE | outbound connection", true),
+            "🚨 QUARANTINE"
+        );
+    }
+
+    #[test]
+    fn paren_wrapped_interpreter_is_not_trusted() {
+        let event = event("(python3)", "python3 script.py", "/usr/bin/python3");
+        assert!(!is_trusted(&event));
+        assert_eq!(classify_event(&event), ProcessDisposition::Suspicious);
     }
 }

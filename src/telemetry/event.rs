@@ -44,3 +44,44 @@ pub fn stat_inode(path: &str) -> Option<(u64, u64)> {
 pub fn proc_exists(pid: u32) -> bool {
     Path::new(&format!("/proc/{}", pid)).exists()
 }
+
+/// Strip kernel thread / wrapper parens: `(python3)` → `python3`.
+pub fn normalize_proc_name(name: &str) -> String {
+    let trimmed = name.trim();
+    trimmed
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or(trimmed)
+        .to_string()
+}
+
+/// Prefer exe path basename; fall back to comm when path is empty or has no basename.
+pub fn proc_name_from_exe(exe_path: &str, fallback_comm: &str) -> String {
+    Path::new(exe_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .map(normalize_proc_name)
+        .unwrap_or_else(|| normalize_proc_name(fallback_comm))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_proc_name_strips_parens() {
+        assert_eq!(normalize_proc_name("(python3)"), "python3");
+        assert_eq!(normalize_proc_name("python3"), "python3");
+        assert_eq!(normalize_proc_name("  bash  "), "bash");
+    }
+
+    #[test]
+    fn proc_name_from_exe_uses_basename() {
+        assert_eq!(
+            proc_name_from_exe("/usr/bin/git-remote-https", "git"),
+            "git-remote-https"
+        );
+        assert_eq!(proc_name_from_exe("", "rg"), "rg");
+    }
+}

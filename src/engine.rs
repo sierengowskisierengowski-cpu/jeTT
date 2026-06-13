@@ -193,6 +193,7 @@ pub fn guard(
     model: &LlamaModel,
     event: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    ctx.clear_kv_cache();
     let prompt = format!(
         "You are jeTT, a security classifier. Analyze this process event and respond with EXACTLY ONE WORD: either QUARANTINE (if malicious/suspicious) or ALLOW (if legitimate). Do not explain. Do not add detail.\n\n[EVENT] {}\n\nVERDICT:",
         event

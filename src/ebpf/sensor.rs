@@ -13,7 +13,7 @@ use crossbeam_channel::Sender;
 use libbpf_rs::MapCore;
 use libbpf_rs::{ObjectBuilder, RingBufferBuilder};
 
-use crate::telemetry::event::{stat_inode, EventSource, ProcessEvent};
+use crate::telemetry::event::{proc_name_from_exe, stat_inode, EventSource, ProcessEvent};
 use crate::telemetry::stats::TelemetryStats;
 
 #[repr(C)]
@@ -57,7 +57,7 @@ fn jett_event_to_process(ev: &JettEvent) -> ProcessEvent {
     let inode = stat_inode(&path);
     ProcessEvent {
         pid: ev.pid,
-        name: comm.clone(),
+        name: proc_name_from_exe(&path, &comm),
         cmdline: String::new(),
         exe_path: path,
         uid: ev.uid,

@@ -8,5 +8,7 @@ pub use config::{
     telemetry_mode_label, TelemetryMode,
 };
 pub use coordinator::EventCoordinator;
-pub use event::{stat_inode, EventSource, ProcessEvent, JETT_EVT_EXEC};
+pub use event::{
+    normalize_proc_name, proc_name_from_exe, stat_inode, EventSource, ProcessEvent, JETT_EVT_EXEC,
+};
 pub use stats::TelemetryStats;
