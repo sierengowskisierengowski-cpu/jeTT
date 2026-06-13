@@ -218,10 +218,11 @@ pub fn guard(
     // A reverse shell IS /usr/bin/bash making an outbound connection — so these
     // must NEVER inherit trust by path OR by hash. They ALWAYS get judged by the
     // model on behavior, wherever they run from.
-    const NEVER_FAST_TRUST: [&str; 22] = [
+    const NEVER_FAST_TRUST: [&str; 26] = [
         "bash", "sh", "zsh", "dash", "fish", "ksh", "tcsh",
         "python", "python3", "perl", "ruby", "node", "php", "lua",
         "nc", "ncat", "netcat", "socat", "telnet", "ssh", "awk", "xterm",
+        "curl", "wget", "base64", "pkexec",
     ];
 
     let exe_path = event

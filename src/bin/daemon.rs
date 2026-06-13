@@ -284,10 +284,11 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
 
 // Shells, interpreters, and net tools — same list as engine::guard NEVER_FAST_TRUST.
 // These must never get Trusted disposition; behavior goes to the model.
-const NEVER_FAST_TRUST: [&str; 22] = [
+const NEVER_FAST_TRUST: [&str; 26] = [
     "bash", "sh", "zsh", "dash", "fish", "ksh", "tcsh",
     "python", "python3", "perl", "ruby", "node", "php", "lua",
     "nc", "ncat", "netcat", "socat", "telnet", "ssh", "awk", "xterm",
+    "curl", "wget", "base64", "pkexec",
 ];
 
 fn is_never_fast_trust(event: &ProcessEvent) -> bool {
@@ -1224,5 +1225,18 @@ mod tests {
         let event = event("(python3)", "python3 script.py", "/usr/bin/python3");
         assert!(!is_trusted(&event));
         assert_eq!(classify_event(&event), ProcessDisposition::Suspicious);
+    }
+
+    #[test]
+    fn lolbins_never_get_trusted_disposition() {
+        for (name, exe) in [
+            ("curl", "/usr/bin/curl"),
+            ("wget", "/usr/bin/wget"),
+            ("base64", "/usr/bin/base64"),
+            ("pkexec", "/usr/bin/pkexec"),
+        ] {
+            let event = event(name, name, exe);
+            assert!(!is_trusted(&event), "{name} must not be trusted");
+        }
     }
 }
