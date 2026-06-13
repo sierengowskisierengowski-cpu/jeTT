@@ -212,29 +212,46 @@ pub fn guard(
         cargo_dir.as_str(),
         rustup_dir.as_str(),
     ];
-    // Pull out just the exe path from "...exe:/real/path cmd:..."
+
+    // Shells, interpreters, and net tools are the #1 lolbin attack vector.
+    // A reverse shell IS /usr/bin/bash making an outbound connection — so these
+    // must NEVER inherit trust by path OR by hash. They ALWAYS get judged by the
+    // model on behavior, wherever they run from.
+    const NEVER_FAST_TRUST: [&str; 22] = [
+        "bash", "sh", "zsh", "dash", "fish", "ksh", "tcsh",
+        "python", "python3", "perl", "ruby", "node", "php", "lua",
+        "nc", "ncat", "netcat", "socat", "telnet", "ssh", "awk", "xterm",
+    ];
+
     let exe_path = event
         .split("exe:")
         .nth(1)
         .and_then(|s| s.split(" cmd:").next())
         .unwrap_or("")
         .trim();
-    for prefix in &trusted_prefixes {
-        if exe_path.starts_with(prefix) {
-            println!("🛡️  GUARD  → ✅ ALLOW | raw: TRUSTED_PATH (0ms)");
-            return Ok("ALLOW".to_string());
-        }
-    }
-    // Hash-based allowlist: a binary trusted by SHA-256 is allowed no matter
-    // where it runs from. Path can be faked; the hash cannot.
-    if !exe_path.is_empty() {
-        if let Some(hash) = hash_file(exe_path) {
-            if load_allowlist().contains(&hash) {
-                println!("\u{1f6e1}\u{fe0f}  GUARD  \u{2192} \u{2705} ALLOW | raw: TRUSTED_HASH (0ms)");
+
+    let exe_name = exe_path.rsplit('/').next().unwrap_or("");
+    let is_interpreter = NEVER_FAST_TRUST.contains(&exe_name);
+
+    if !is_interpreter {
+        for prefix in &trusted_prefixes {
+            if exe_path.starts_with(prefix) {
+                println!("\u{1f6e1}\u{fe0f}  GUARD  \u{2192} \u{2705} ALLOW | raw: TRUSTED_PATH (0ms)");
                 return Ok("ALLOW".to_string());
             }
         }
+
+        if !exe_path.is_empty() {
+            if let Some(hash) = hash_file(exe_path) {
+                if load_allowlist().contains(&hash) {
+                    println!("\u{1f6e1}\u{fe0f}  GUARD  \u{2192} \u{2705} ALLOW | raw: TRUSTED_HASH (0ms)");
+                    return Ok("ALLOW".to_string());
+                }
+            }
+        }
     }
+
+
     let t = Instant::now();
     let result = infer_on_context(ctx, model, &prompt, guard_max_tokens())?;
     let up = result.to_uppercase();
