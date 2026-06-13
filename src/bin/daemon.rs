@@ -9,8 +9,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
 use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
 use jeTT::telemetry::{
-    normalize_proc_name, parse_telemetry_mode, stat_inode, telemetry_mode_label, EventSource,
-    ProcessEvent, TelemetryMode,
+    matches_never_fast_trust, normalize_proc_name, parse_telemetry_mode, stat_inode,
+    telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
 };
 #[cfg(feature = "ebpf")]
 use jeTT::telemetry::{
@@ -282,18 +282,8 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
     })
 }
 
-// Shells, interpreters, and net tools — same list as engine::guard NEVER_FAST_TRUST.
-// These must never get Trusted disposition; behavior goes to the model.
-const NEVER_FAST_TRUST: [&str; 26] = [
-    "bash", "sh", "zsh", "dash", "fish", "ksh", "tcsh",
-    "python", "python3", "perl", "ruby", "node", "php", "lua",
-    "nc", "ncat", "netcat", "socat", "telnet", "ssh", "awk", "xterm",
-    "curl", "wget", "base64", "pkexec",
-];
-
 fn is_never_fast_trust(event: &ProcessEvent) -> bool {
-    let exe_name = event.exe_path.rsplit('/').next().unwrap_or("");
-    NEVER_FAST_TRUST.contains(&event.name.as_str()) || NEVER_FAST_TRUST.contains(&exe_name)
+    matches_never_fast_trust(&event.name) || matches_never_fast_trust(&event.exe_path)
 }
 
 fn classify_event(event: &ProcessEvent) -> ProcessDisposition {
@@ -1234,9 +1224,11 @@ mod tests {
             ("wget", "/usr/bin/wget"),
             ("base64", "/usr/bin/base64"),
             ("pkexec", "/usr/bin/pkexec"),
+            ("python3", "/usr/bin/python3.13"),
+            ("python3", "/usr/bin/python3"),
         ] {
             let event = event(name, name, exe);
-            assert!(!is_trusted(&event), "{name} must not be trusted");
+            assert!(!is_trusted(&event), "{name} {exe} must not be trusted");
         }
     }
 }

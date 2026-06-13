@@ -214,17 +214,6 @@ pub fn guard(
         rustup_dir.as_str(),
     ];
 
-    // Shells, interpreters, and net tools are the #1 lolbin attack vector.
-    // A reverse shell IS /usr/bin/bash making an outbound connection — so these
-    // must NEVER inherit trust by path OR by hash. They ALWAYS get judged by the
-    // model on behavior, wherever they run from.
-    const NEVER_FAST_TRUST: [&str; 26] = [
-        "bash", "sh", "zsh", "dash", "fish", "ksh", "tcsh",
-        "python", "python3", "perl", "ruby", "node", "php", "lua",
-        "nc", "ncat", "netcat", "socat", "telnet", "ssh", "awk", "xterm",
-        "curl", "wget", "base64", "pkexec",
-    ];
-
     let exe_path = event
         .split("exe:")
         .nth(1)
@@ -233,7 +222,7 @@ pub fn guard(
         .trim();
 
     let exe_name = exe_path.rsplit('/').next().unwrap_or("");
-    let is_interpreter = NEVER_FAST_TRUST.contains(&exe_name);
+    let is_interpreter = crate::telemetry::matches_never_fast_trust(exe_name);
 
     if !is_interpreter {
         for prefix in &trusted_prefixes {
