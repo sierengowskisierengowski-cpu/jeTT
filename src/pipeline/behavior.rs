@@ -24,22 +24,77 @@ fn parse_hex_addr(hex: &str) -> Option<String> {
     Some(format!("{}.{}.{}.{}:{}", b1, b2, b3, b4, port))
 }
 
+/// Parse `socket:[inode]` from a `/proc/{pid}/fd/*` readlink target.
+fn socket_inode_from_fd_link(link: &str) -> Option<u64> {
+    link.strip_prefix("socket:[")?
+        .strip_suffix(']')?
+        .parse()
+        .ok()
+}
+
+fn collect_socket_inodes_for_pid(pid: u32) -> HashSet<u64> {
+    let mut inodes = HashSet::new();
+    let fd_dir = format!("/proc/{}/fd", pid);
+    if let Ok(entries) = fs::read_dir(&fd_dir) {
+        for entry in entries.flatten() {
+            if let Ok(target) = fs::read_link(entry.path()) {
+                if let Some(ino) = socket_inode_from_fd_link(&target.to_string_lossy()) {
+                    inodes.insert(ino);
+                }
+            }
+        }
+    }
+    inodes
+}
+
+/// Socket inodes owned by `pid` and its direct children (`/proc/.../children`).
+fn collect_socket_inodes(pid: u32) -> HashSet<u64> {
+    let mut inodes = collect_socket_inodes_for_pid(pid);
+    let path = format!("/proc/{}/task/{}/children", pid, pid);
+    if let Ok(text) = fs::read_to_string(&path) {
+        for child_pid in text.split_whitespace() {
+            if let Ok(cp) = child_pid.parse::<u32>() {
+                inodes.extend(collect_socket_inodes_for_pid(cp));
+            }
+        }
+    }
+    inodes
+}
+
+/// Return remote address from a `/proc/net/tcp` row when its inode is in `inodes`.
+fn connection_addr_from_tcp_line(line: &str, inodes: &HashSet<u64>) -> Option<String> {
+    let cols: Vec<&str> = line.split_whitespace().collect();
+    if cols.len() <= 9 {
+        return None;
+    }
+    let inode: u64 = cols[9].parse().ok()?;
+    if !inodes.contains(&inode) {
+        return None;
+    }
+    let state = cols[3];
+    if state != "01" && state != "02" {
+        return None;
+    }
+    let addr = parse_hex_addr(cols[2])?;
+    if addr.starts_with("127.") || addr.starts_with("0.0.0.0") {
+        return None;
+    }
+    Some(addr)
+}
+
 fn collect_connections(pid: u32) -> Vec<String> {
+    let inodes = collect_socket_inodes(pid);
+    if inodes.is_empty() {
+        return Vec::new();
+    }
+
     let mut conns = Vec::new();
     for proto in &["tcp", "tcp6"] {
         let path = format!("/proc/{}/net/{}", pid, proto);
         if let Ok(text) = fs::read_to_string(&path) {
             for line in text.lines().skip(1) {
-                let cols: Vec<&str> = line.split_whitespace().collect();
-                if cols.len() > 3 {
-                    let state = cols[3];
-                    if state == "01" || state == "02" {
-                        if let Some(addr) = parse_hex_addr(cols[2]) {
-                            if !addr.starts_with("127.") && !addr.starts_with("0.0.0.0") {
-                                conns.push(addr);
-                            }
-                        }
-                    }
+                if let Some(addr) = connection_addr_from_tcp_line(line, &inodes) {
+                    conns.push(addr);
                 }
             }
         }
@@ -173,4 +228,66 @@ pub fn collect_behavior(pid: u32) -> String {
     }
 
     behavior_profile_from(all_conns, all_files, all_kids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn parse_hex_addr_ipv4() {
+        assert_eq!(
+            parse_hex_addr("0100007F:0050"),
+            Some("127.0.0.1:80".to_string())
+        );
+        assert_eq!(
+            parse_hex_addr("5855A8C0:01BB"),
+            Some("192.168.85.88:443".to_string())
+        );
+        assert_eq!(parse_hex_addr("bad"), None);
+        assert_eq!(parse_hex_addr("0100007F"), None);
+    }
+
+    #[test]
+    fn socket_inode_from_fd_link_parses_proc_format() {
+        assert_eq!(socket_inode_from_fd_link("socket:[955338]"), Some(955338));
+        assert_eq!(socket_inode_from_fd_link("/etc/passwd"), None);
+        assert_eq!(socket_inode_from_fd_link("socket:[not-a-number]"), None);
+    }
+
+    #[test]
+    fn connection_addr_from_tcp_line_filters_by_inode_and_state() {
+        let line = "   1: 00000000:0016 5855A8C0:01BB 01 00000000:00000000 00:00000000 00000000     0        0 955338 1 00000000c7e78223 100 0 0 10 0";
+        let mut inodes = HashSet::new();
+        inodes.insert(955338);
+        assert_eq!(
+            connection_addr_from_tcp_line(line, &inodes),
+            Some("192.168.85.88:443".to_string())
+        );
+
+        inodes.clear();
+        inodes.insert(999999);
+        assert_eq!(connection_addr_from_tcp_line(line, &inodes), None);
+
+        let listen = "   0: 0100007F:AB31 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 955338 1 00000000c7e78223 100 0 0 10 0";
+        inodes.insert(955338);
+        assert_eq!(connection_addr_from_tcp_line(listen, &inodes), None);
+    }
+
+    #[test]
+    fn connection_addr_from_tcp_line_skips_loopback_remote() {
+        let line = "   2: 00000000:0016 0100007F:8FCE 01 00000000:00000000 00:00000000 00000000     0        0 42 1 00000000c7e78223 100 0 0 10 0";
+        let mut inodes = HashSet::new();
+        inodes.insert(42);
+        assert_eq!(connection_addr_from_tcp_line(line, &inodes), None);
+    }
+
+    /// When a process has no socket fds, outbound_connections must not appear in the profile.
+    #[test]
+    fn empty_socket_inodes_omit_outbound_connections_from_profile() {
+        let profile = behavior_profile_from(HashSet::new(), HashSet::new(), HashSet::new());
+        assert!(!profile.contains("outbound_connections"));
+        assert!(profile.contains("behavior:none_observed"));
+    }
 }
