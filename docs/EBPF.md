@@ -4,7 +4,7 @@ Authoritative design doc for adding kernel telemetry to jeTT. This revision fold
 review feedback on hooks, short-lived processes, AI throughput, quarantine identity,
 self-noise, and Phase 0 testing discipline.
 
-**Status:** planning — not yet implemented on `main`.
+**Status:** Phase 2 landed — daemon wires ringbuf → coordinator → bounded AI queue (`--features ebpf`). Phase 3+ not started.
 
 ---
 

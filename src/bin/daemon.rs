@@ -7,7 +7,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
-use jeTT::telemetry::{parse_telemetry_mode, telemetry_mode_label, TelemetryMode};
+use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
+use jeTT::telemetry::{
+    parse_telemetry_mode, stat_inode, telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
+};
+#[cfg(feature = "ebpf")]
+use jeTT::telemetry::{
+    ai_queue_size, dedup_window_ms, stat_log_interval_sec, EventCoordinator, TelemetryStats,
+};
+#[cfg(feature = "ebpf")]
+use jeTT::ebpf::spawn_ebpf_sensor;
 
 // ─────────────────────────────────────────────
 // jeTT Daemon — Real System Event Monitor
@@ -88,23 +97,6 @@ const SUSPICIOUS_LITERALS: &[&str] = &[
     "base64 -d",
     "/.ssh/authorized_keys",
 ];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EventSource {
-    Proc,
-    Ebpf,
-}
-
-#[derive(Debug, Clone)]
-struct ProcessEvent {
-    pid: u32,
-    name: String,
-    cmdline: String,
-    exe_path: String,
-    uid: u32,
-    timestamp: u64,
-    source: EventSource,
-}
 
 #[derive(Debug)]
 struct JettVerdict {
@@ -274,6 +266,8 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
         .parse()
         .map_err(|_| ProcReadError::InvalidUid { pid, raw: uid_raw })?;
 
+    let inode = stat_inode(&exe_path);
+
     Ok(ProcessEvent {
         pid,
         name,
@@ -282,6 +276,7 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
         uid,
         timestamp: get_timestamp(),
         source: EventSource::Proc,
+        inode,
     })
 }
 
@@ -369,181 +364,6 @@ fn is_suspicious(event: &ProcessEvent) -> bool {
     }
 
     false
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// BEHAVIORAL ANALYSIS
-// Watch what a process actually DOES, not just how it launched.
-// Reads /proc/PID/ for ~1.5s and builds a behavior profile string.
-// This is the difference between "a binary started in /tmp" and
-// "a binary started in /tmp, connected to 185.x.x.x, read /etc/shadow,
-//  spawned bash, and pegged the CPU."
-// ─────────────────────────────────────────────────────────────────────────
-
-/// Parse a hex IP:port from /proc/PID/net/tcp into a readable string.
-/// The kernel stores addresses little-endian hex, e.g. "0100007F:1F90".
-fn parse_hex_addr(hex: &str) -> Option<String> {
-    let parts: Vec<&str> = hex.split(':').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-    let ip_hex = parts[0];
-    let port_hex = parts[1];
-    if ip_hex.len() != 8 {
-        return None;
-    }
-    // IP bytes are reversed (little-endian)
-    let b1 = u8::from_str_radix(&ip_hex[6..8], 16).ok()?;
-    let b2 = u8::from_str_radix(&ip_hex[4..6], 16).ok()?;
-    let b3 = u8::from_str_radix(&ip_hex[2..4], 16).ok()?;
-    let b4 = u8::from_str_radix(&ip_hex[0..2], 16).ok()?;
-    let port = u16::from_str_radix(port_hex, 16).ok()?;
-    Some(format!("{}.{}.{}.{}:{}", b1, b2, b3, b4, port))
-}
-
-/// Read outbound TCP connections for a PID from /proc/PID/net/tcp.
-/// State "01" = ESTABLISHED. We report the remote (destination) address.
-fn collect_connections(pid: u32) -> Vec<String> {
-    let mut conns = Vec::new();
-    for proto in &["tcp", "tcp6"] {
-        let path = format!("/proc/{}/net/{}", pid, proto);
-        if let Ok(text) = fs::read_to_string(&path) {
-            for line in text.lines().skip(1) {
-                let cols: Vec<&str> = line.split_whitespace().collect();
-                // col 2 = remote addr, col 3 = connection state
-                if cols.len() > 3 {
-                    let state = cols[3];
-                    // 01 = ESTABLISHED, 02 = SYN_SENT (actively connecting out)
-                    if state == "01" || state == "02" {
-                        if let Some(addr) = parse_hex_addr(cols[2]) {
-                            // Skip loopback / unspecified
-                            if !addr.starts_with("127.") && !addr.starts_with("0.0.0.0") {
-                                conns.push(addr);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    conns.sort();
-    conns.dedup();
-    conns
-}
-
-/// Read open file descriptors for a PID from /proc/PID/fd/.
-/// Returns paths the process currently has open, flagging sensitive ones.
-fn collect_open_files(pid: u32) -> Vec<String> {
-    let mut files = Vec::new();
-    let fd_dir = format!("/proc/{}/fd", pid);
-    if let Ok(entries) = fs::read_dir(&fd_dir) {
-        for entry in entries.flatten() {
-            if let Ok(target) = fs::read_link(entry.path()) {
-                let p = target.to_string_lossy().to_string();
-                // Only report real files in sensitive/interesting locations
-                if p.starts_with("/etc/")
-                    || p.contains("/.ssh/")
-                    || p.starts_with("/root/")
-                    || p.contains("shadow")
-                    || p.contains("passwd")
-                    || p.starts_with("/var/spool/cron")
-                    || p.contains("/cron.d/")
-                {
-                    files.push(p);
-                }
-            }
-        }
-    }
-    files.sort();
-    files.dedup();
-    files
-}
-
-/// Read child PIDs spawned by this process from /proc/PID/task/PID/children.
-fn collect_children(pid: u32) -> Vec<String> {
-    let mut kids = Vec::new();
-    let path = format!("/proc/{}/task/{}/children", pid, pid);
-    if let Ok(text) = fs::read_to_string(&path) {
-        for child_pid in text.split_whitespace() {
-            // Read the child's name from its comm
-            if let Ok(name) = fs::read_to_string(format!("/proc/{}/comm", child_pid)) {
-                kids.push(name.trim().to_string());
-            }
-        }
-    }
-    kids.sort();
-    kids.dedup();
-    kids
-}
-
-fn behavior_mode_snapshot() -> bool {
-    std::env::var("JETT_BEHAVIOR_MODE")
-        .map(|m| m.eq_ignore_ascii_case("snapshot"))
-        .unwrap_or(true)
-}
-
-fn behavior_profile_from(all_conns: HashSet<String>, all_files: HashSet<String>, all_kids: HashSet<String>) -> String {
-    let mut profile = String::new();
-    if !all_conns.is_empty() {
-        let mut v: Vec<String> = all_conns.into_iter().collect();
-        v.sort();
-        profile.push_str(&format!(" outbound_connections:[{}]", v.join(",")));
-    }
-    if !all_files.is_empty() {
-        let mut v: Vec<String> = all_files.into_iter().collect();
-        v.sort();
-        profile.push_str(&format!(" sensitive_files:[{}]", v.join(",")));
-    }
-    if !all_kids.is_empty() {
-        let mut v: Vec<String> = all_kids.into_iter().collect();
-        v.sort();
-        profile.push_str(&format!(" spawned_children:[{}]", v.join(",")));
-    }
-    if profile.is_empty() {
-        profile.push_str(" behavior:none_observed");
-    }
-    profile
-}
-
-/// Watch a process and build a behavior profile string (appended before model judgment).
-/// Default: snapshot (single /proc read). Set JETT_BEHAVIOR_MODE=poll for ~1.5s window.
-fn collect_behavior(pid: u32) -> String {
-    let mut all_conns: HashSet<String> = HashSet::new();
-    let mut all_files: HashSet<String> = HashSet::new();
-    let mut all_kids: HashSet<String> = HashSet::new();
-
-    if behavior_mode_snapshot() {
-        for c in collect_connections(pid) {
-            all_conns.insert(c);
-        }
-        for f in collect_open_files(pid) {
-            all_files.insert(f);
-        }
-        for k in collect_children(pid) {
-            all_kids.insert(k);
-        }
-        return behavior_profile_from(all_conns, all_files, all_kids);
-    }
-
-    // Poll 3 times over ~1.5s to catch behavior that develops after launch.
-    for _ in 0..3 {
-        for c in collect_connections(pid) {
-            all_conns.insert(c);
-        }
-        for f in collect_open_files(pid) {
-            all_files.insert(f);
-        }
-        for k in collect_children(pid) {
-            all_kids.insert(k);
-        }
-        // If the process already exited, stop early.
-        if !Path::new(&format!("/proc/{}", pid)).exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(500));
-    }
-
-    behavior_profile_from(all_conns, all_files, all_kids)
 }
 
 fn env_flag(name: &str, default_on: bool) -> bool {
@@ -813,6 +633,300 @@ fn cleanup_dead_pids(seen_pids: &Arc<Mutex<HashSet<u32>>>) {
     seen.retain(|&pid| Path::new(&format!("/proc/{}", pid)).exists());
 }
 
+fn behavior_mode_label() -> &'static str {
+    match std::env::var("JETT_BEHAVIOR_MODE") {
+        Ok(m) if m.eq_ignore_ascii_case("poll") => "poll",
+        _ => "snapshot",
+    }
+}
+
+fn skip_event(event: &ProcessEvent) -> bool {
+    event.exe_path.is_empty() || event.exe_path.contains("(deleted)")
+}
+
+fn profile_for_event(event: &ProcessEvent) -> String {
+    match event.source {
+        EventSource::Ebpf => {
+            let (profile, exited) = snapshot_behavior(event.pid);
+            if exited {
+                eprintln!(
+                    "[*] behavior:exited_before_snapshot pid={} path={}",
+                    event.pid, event.exe_path
+                );
+            }
+            profile
+        }
+        EventSource::Proc => collect_behavior(event.pid),
+    }
+}
+
+fn finalize_ai_verdict(
+    event: ProcessEvent,
+    event_str: &str,
+    reason: String,
+    enforce_mode: bool,
+    engine: &Engine,
+    started: Instant,
+) -> JettVerdict {
+    let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
+    if model_says_quarantine {
+        capture_forensics(&event, event_str, &reason);
+        if env_flag("JETT_ALERT_ON_QUARANTINE", true) {
+            let _ = engine_alert(&engine.model, &engine.backend, event_str);
+        }
+    }
+    let verdict_label = if model_says_quarantine {
+        if enforce_mode {
+            println!(
+                "🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})",
+                event.pid, event.name
+            );
+            quarantine_process(&event);
+            "🚨 QUARANTINE".to_string()
+        } else {
+            println!(
+                "🟡 [LEARN MODE] WOULD quarantine PID {} ({}) — not killing",
+                event.pid, event.name
+            );
+            "🟡 WOULD-QUARANTINE".to_string()
+        }
+    } else {
+        println!("✅ [AI VERDICT: ALLOW] {} cleared by model", event.name);
+        "✅ ALLOW".to_string()
+    };
+
+    JettVerdict {
+        verdict: verdict_label,
+        reason,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        event,
+    }
+}
+
+fn handle_suspicious_inline(
+    event: ProcessEvent,
+    enforce_mode: bool,
+    guard_ctx: &mut llama_cpp_2::context::LlamaContext<'_>,
+    engine: &Engine,
+) {
+    let t = Instant::now();
+    println!(
+        "🚨 [SUSPICIOUS DETECTED] {} ({}) — profiling behavior...",
+        event.name,
+        event.source_label()
+    );
+    let behavior = profile_for_event(&event);
+    let event_str = format!("{}{}", format_event_for_ai(&event), behavior);
+    println!("🔬 [BEHAVIOR]{}", behavior);
+    println!("🧠 [SENDING TO AI] {}", event.name);
+
+    let reason = match engine_guard(guard_ctx, &engine.model, &event_str) {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("[!] guard inference failed: {}", error);
+            format!("ERROR: {}", error)
+        }
+    };
+
+    let verdict = finalize_ai_verdict(event, &event_str, reason, enforce_mode, engine, t);
+    log_verdict(&verdict);
+}
+
+#[cfg(feature = "ebpf")]
+fn dispatch_telemetry_event(
+    event: ProcessEvent,
+    coordinator: &mut EventCoordinator,
+    stats: &TelemetryStats,
+    ai_tx: &crossbeam_channel::Sender<ProcessEvent>,
+) {
+    if skip_event(&event) {
+        return;
+    }
+    if !coordinator.accept(&event) {
+        stats.dedup.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return;
+    }
+
+    let t = Instant::now();
+    match classify_event(&event) {
+        ProcessDisposition::Trusted => {
+            stats
+                .classify_drop
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let verdict = JettVerdict {
+                verdict: "✅ ALLOW".to_string(),
+                reason: "Trusted GowskiNet process".to_string(),
+                elapsed_ms: t.elapsed().as_millis() as u64,
+                event,
+            };
+            if verdict.event.uid == 1000 {
+                log_verdict(&verdict);
+            }
+        }
+        ProcessDisposition::Suspicious => {
+            match ai_tx.try_send(event) {
+                Ok(()) => {
+                    stats
+                        .ai_queued
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(crossbeam_channel::TrySendError::Full(_)) => {
+                    stats
+                        .ai_dropped
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    eprintln!("[!] AI queue full — dropped suspicious event");
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    eprintln!("[!] AI queue disconnected");
+                }
+            }
+        }
+        ProcessDisposition::Unknown => {
+            let verdict = JettVerdict {
+                verdict: "⚠️  REVIEW".to_string(),
+                reason: format!("Unknown process: {}", event.exe_path),
+                elapsed_ms: t.elapsed().as_millis() as u64,
+                event,
+            };
+            log_verdict(&verdict);
+        }
+    }
+}
+
+#[cfg(feature = "ebpf")]
+fn run_inference_worker(
+    ai_rx: crossbeam_channel::Receiver<ProcessEvent>,
+    engine: Engine,
+    enforce_mode: bool,
+    stats: std::sync::Arc<TelemetryStats>,
+) {
+    let mut guard_ctx = match new_guard_context(&engine) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            eprintln!("[!] inference thread: guard context failed: {}", err);
+            return;
+        }
+    };
+
+    while let Ok(event) = ai_rx.recv() {
+        let t = Instant::now();
+        println!(
+            "🚨 [SUSPICIOUS DETECTED] {} ({}) — profiling behavior...",
+            event.name,
+            event.source_label()
+        );
+        let behavior = profile_for_event(&event);
+        let event_str = format!("{}{}", format_event_for_ai(&event), behavior);
+        println!("🔬 [BEHAVIOR]{}", behavior);
+        println!("🧠 [SENDING TO AI] {}", event.name);
+
+        let reason = match engine_guard(&mut guard_ctx, &engine.model, &event_str) {
+            Ok(output) => output,
+            Err(error) => {
+                eprintln!("[!] guard inference failed: {}", error);
+                format!("ERROR: {}", error)
+            }
+        };
+
+        stats
+            .ai_verdicts
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let verdict =
+            finalize_ai_verdict(event, &event_str, reason, enforce_mode, &engine, t);
+        log_verdict(&verdict);
+    }
+}
+
+#[cfg(feature = "ebpf")]
+fn run_multisource_daemon(
+    engine: Engine,
+    telemetry: TelemetryMode,
+    enforce_mode: bool,
+    seen_pids: Arc<Mutex<HashSet<u32>>>,
+) {
+    use crossbeam_channel;
+    use std::sync::Arc;
+
+    let (event_tx, event_rx) = crossbeam_channel::unbounded::<ProcessEvent>();
+    let (ai_tx, ai_rx) = crossbeam_channel::bounded::<ProcessEvent>(ai_queue_size());
+    let stats = TelemetryStats::new();
+    let mut coordinator = EventCoordinator::new(dedup_window_ms());
+
+    let mut ebpf_active = false;
+    if matches!(telemetry, TelemetryMode::Ebpf | TelemetryMode::Both) {
+        match spawn_ebpf_sensor(event_tx.clone(), Arc::clone(&stats)) {
+            Ok(_handle) => {
+                ebpf_active = true;
+                println!(
+                    "[*] JETT_TELEMETRY={} — eBPF ringbuf active",
+                    telemetry_mode_label(telemetry)
+                );
+            }
+            Err(err) => {
+                eprintln!("[!] eBPF load failed: {}", err);
+                if matches!(telemetry, TelemetryMode::Ebpf) {
+                    eprintln!("[*] falling back to /proc-only telemetry");
+                }
+            }
+        }
+    }
+
+    let use_proc = matches!(telemetry, TelemetryMode::Proc | TelemetryMode::Both)
+        || (!ebpf_active && matches!(telemetry, TelemetryMode::Ebpf));
+
+    if use_proc {
+        println!("[*] /proc scanner active");
+    }
+
+    let stats_worker = Arc::clone(&stats);
+    let _inference = thread::Builder::new()
+        .name("jett-inference".into())
+        .spawn(move || run_inference_worker(ai_rx, engine, enforce_mode, stats_worker))
+        .expect("spawn inference thread");
+
+    println!("[✅] jeTT daemon started — telemetry pipeline active");
+    println!("[*] AI queue size: {}", ai_queue_size());
+    println!("[*] Logs: {}", LOG_DIR);
+    println!("[*] Quarantine: {}", QUARANTINE_DIR);
+    println!("[*] Press Ctrl+C to stop\n");
+
+    println!("[*] Initial process scan...");
+    let initial_events = scan_new_processes(&seen_pids);
+    println!(
+        "[*] Found {} existing processes — these will be skipped",
+        initial_events.len()
+    );
+    println!("[*] Now monitoring for NEW processes...\n");
+
+    let mut loop_count = 0u64;
+    let mut last_stats = Instant::now();
+    let stat_interval = Duration::from_secs(stat_log_interval_sec());
+
+    loop {
+        if use_proc {
+            for event in scan_new_processes(&seen_pids) {
+                let _ = event_tx.send(event);
+            }
+        }
+
+        while let Ok(event) = event_rx.try_recv() {
+            dispatch_telemetry_event(event, &mut coordinator, &stats, &ai_tx);
+        }
+
+        loop_count += 1;
+        if loop_count % 60 == 0 {
+            cleanup_dead_pids(&seen_pids);
+        }
+
+        if last_stats.elapsed() >= stat_interval {
+            println!("{}", stats.log_line());
+            last_stats = Instant::now();
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn main() {
     println!("╔═══════════════════════════════════════════╗");
     print_banner_line(&format!("jeTT Daemon v{}", VERSION));
@@ -853,25 +967,24 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let mut guard_ctx = match new_guard_context(&engine) {
-        Ok(ctx) => ctx,
-        Err(err) => {
-            eprintln!("[!] Failed to create guard context: {}", err);
-            std::process::exit(1);
-        }
-    };
-    let behavior_mode = if behavior_mode_snapshot() {
-        "snapshot"
-    } else {
-        "poll"
-    };
+    let behavior_mode = behavior_mode_label();
     let telemetry = parse_telemetry_mode();
-    if matches!(telemetry, TelemetryMode::Ebpf | TelemetryMode::Both) {
-        println!(
-            "[*] JETT_TELEMETRY={} — eBPF ringbuf not wired yet; using /proc fallback",
-            telemetry_mode_label(telemetry)
-        );
-    } else {
+    #[cfg(feature = "ebpf")]
+    let use_pipeline =
+        matches!(telemetry, TelemetryMode::Ebpf | TelemetryMode::Both);
+    #[cfg(not(feature = "ebpf"))]
+    {
+        if matches!(telemetry, TelemetryMode::Ebpf | TelemetryMode::Both) {
+            println!(
+                "[*] JETT_TELEMETRY={} — rebuild with --features ebpf; using /proc",
+                telemetry_mode_label(telemetry)
+            );
+        } else {
+            println!("[*] JETT_TELEMETRY=proc");
+        }
+    }
+    #[cfg(feature = "ebpf")]
+    if !use_pipeline {
         println!("[*] JETT_TELEMETRY=proc");
     }
     println!(
@@ -890,12 +1003,29 @@ fn main() {
     } else {
         println!("[\u{1f6e1}] LEARN MODE — jeTT logs would-kills but does NOT kill (set JETT_MODE=enforce to enable killing)");
     }
+    println!("[*] Press Ctrl+C to stop\n");
+
+    let seen_pids: Arc<Mutex<HashSet<u32>>> = Arc::new(Mutex::new(HashSet::new()));
+
+    #[cfg(feature = "ebpf")]
+    if use_pipeline {
+        return run_multisource_daemon(engine, telemetry, enforce_mode, seen_pids);
+    }
+
+    let mut guard_ctx = match new_guard_context(&engine) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            eprintln!("[!] Failed to create guard context: {}", err);
+            std::process::exit(1);
+        }
+    };
+
     println!("[✅] jeTT daemon started — watching /proc for new processes");
     println!("[*] Logs: {}", LOG_DIR);
     println!("[*] Quarantine: {}", QUARANTINE_DIR);
     println!("[*] Press Ctrl+C to stop\n");
 
-    let seen_pids: Arc<Mutex<HashSet<u32>>> = Arc::new(Mutex::new(HashSet::new()));
+    let seen_pids = seen_pids;
 
     println!("[*] Initial process scan...");
     let initial_events = scan_new_processes(&seen_pids);
@@ -911,7 +1041,7 @@ fn main() {
         let new_events = scan_new_processes(&seen_pids);
 
         for event in new_events {
-            if event.exe_path.is_empty() || event.exe_path.contains("(deleted)") {
+            if skip_event(&event) {
                 continue;
             }
 
@@ -930,54 +1060,7 @@ fn main() {
                     }
                 }
                 ProcessDisposition::Suspicious => {
-                    println!("🚨 [SUSPICIOUS DETECTED] {} — profiling behavior...", event.name);
-                    // BEHAVIORAL ANALYSIS: watch what the process actually does
-                    // (network, sensitive files, child processes) before judging.
-                    let behavior = collect_behavior(event.pid);
-                    let event_str = format!("{}{}", format_event_for_ai(&event), behavior);
-                    println!("🔬 [BEHAVIOR]{}", behavior);
-                    println!("🧠 [SENDING TO AI] {}", event.name);
-
-                    // Warm-model verdict: call the in-process model directly.
-                    // No subprocess, no 600ms reload — model stays in VRAM.
-                    let reason = match engine_guard(&mut guard_ctx, &engine.model, &event_str) {
-                        Ok(output) => output,
-                        Err(error) => {
-                            eprintln!("[!] guard inference failed: {}", error);
-                            format!("ERROR: {}", error)
-                        }
-                    };
-
-                    // GATE: only kill if the AI model actually returned QUARANTINE.
-                    // The trained model is the trigger — not the path heuristic.
-                    let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
-                    if model_says_quarantine {
-                        capture_forensics(&event, &event_str, &reason);
-                        if env_flag("JETT_ALERT_ON_QUARANTINE", true) {
-                            let _ = engine_alert(&engine.model, &engine.backend, &event_str);
-                        }
-                    }
-                    let verdict_label = if model_says_quarantine {
-                        if enforce_mode {
-                            println!("🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})", event.pid, event.name);
-                            quarantine_process(&event);
-                            "🚨 QUARANTINE".to_string()
-                        } else {
-                            println!("🟡 [LEARN MODE] WOULD quarantine PID {} ({}) — not killing", event.pid, event.name);
-                            "🟡 WOULD-QUARANTINE".to_string()
-                        }
-                    } else {
-                        println!("✅ [AI VERDICT: ALLOW] {} cleared by model", event.name);
-                        "✅ ALLOW".to_string()
-                    };
-
-                    let verdict = JettVerdict {
-                        verdict: verdict_label,
-                        reason,
-                        elapsed_ms: t.elapsed().as_millis() as u64,
-                        event,
-                    };
-                    log_verdict(&verdict);
+                    handle_suspicious_inline(event, enforce_mode, &mut guard_ctx, &engine);
                 }
                 ProcessDisposition::Unknown => {
                     let verdict = JettVerdict {
@@ -1013,6 +1096,7 @@ mod tests {
             uid: 1000,
             timestamp: 1,
             source: EventSource::Proc,
+            inode: None,
         }
     }
 
