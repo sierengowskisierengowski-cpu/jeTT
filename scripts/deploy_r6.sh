@@ -11,8 +11,12 @@ if [[ ! -f "$MODEL" ]]; then
   exit 1
 fi
 
-echo "[build] release binaries..."
-RUSTFLAGS="${RUSTFLAGS:--L /usr/lib -l nccl}" cargo build --release --bin jeTT --bin jett-daemon
+echo "[build] BPF object..."
+bash scripts/build_bpf.sh
+
+echo "[build] release binaries (ebpf feature)..."
+RUSTFLAGS="${RUSTFLAGS:--L /usr/lib -l nccl}" \
+  cargo build --release --features ebpf --bin jeTT --bin jett-daemon
 
 echo "[install] -> $INSTALL_DIR"
 sudo install -Dm755 target/release/jeTT "$INSTALL_DIR/jeTT"
@@ -23,6 +27,8 @@ sudo mkdir -p /etc/systemd/system/jett-daemon.service.d
 sudo tee /etc/systemd/system/jett-daemon.service.d/override.conf >/dev/null <<EOF
 [Service]
 Environment="JETT_MODEL=$MODEL"
+Environment="JETT_TELEMETRY=both"
+Environment="JETT_MODE=learn"
 EOF
 
 sudo systemctl daemon-reload
