@@ -1,0 +1,8 @@
+# jeTT production model SHA-256 pin
+# Copy to /etc/jett/model.sha256 after pinning your GGUF:
+#   bash scripts/pin_model.sh /path/to/jett-r6-q4_k_m.gguf
+#
+# Or set: JETT_MODEL_SHA256=<64-char-hex>
+# Disable verification: JETT_MODEL_VERIFY=0
+
+# sha256:REPLACE_WITH_sha256sum_output

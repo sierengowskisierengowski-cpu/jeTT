@@ -37,8 +37,8 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 |---|------|--------|-------|
 | 2.1 | **Externalize own-stack allowlist** (`/etc/jett/allowlist.conf` + `JETT_ALLOWLIST`) | [x] | `allowlist_config.rs` + `config/allowlist.example.conf` |
 | 2.2 | **Externalize daemon trusted/toolchain lists** (same config file) | [x] | `trusted_path/proc`, `toolchain_*` in allowlist.conf |
-| 2.3 | Model path + **GGUF integrity check** at startup (sha256) | [ ] | Tamper detection |
-| 2.4 | **Adversarial eval set** + CI tests (prompt injection can't flip verdict) | [ ] | Extend `adversarial.rs` coverage |
+| 2.3 | Model path + **GGUF integrity check** at startup (sha256) | [x] | `model_integrity.rs`, `scripts/pin_model.sh` |
+| 2.4 | **Adversarial eval set** + CI tests (prompt injection can't flip verdict) | [x] | `tests/guard_eval_adversarial.jsonl`, `eval_guard.py --suite adversarial`, `scripts/run_adversarial_eval.sh` |
 | 2.5 | **Enforce mode** smoke/ART suite before any enforce deploy | [ ] | Real kills |
 | 2.6 | Fix **README / STATUS / INSTALL** (jeTT product, not "prototype") | [ ] | Public face |
 
@@ -92,7 +92,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 
 ## Current focus
 
-**Next item:** **2.3** — GGUF integrity check at startup.
+**Next item:** **2.5** — Enforce mode smoke/ART suite before any enforce deploy.
 
 ---
 

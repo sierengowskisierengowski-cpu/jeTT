@@ -9,7 +9,6 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel, Special};
 use llama_cpp_2::sampling::LlamaSampler;
-use sha2::{Digest, Sha256};
 use std::io::Write as _IoWrite;
 
 use crate::telemetry::{
@@ -23,11 +22,7 @@ pub fn allowlist_path() -> String {
 }
 
 pub fn hash_file(path: &str) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    let digest = hasher.finalize();
-    Some(digest.iter().map(|b| format!("{:02x}", b)).collect::<String>())
+    crate::model_integrity::sha256_file(std::path::Path::new(path)).ok()
 }
 
 pub fn load_allowlist() -> std::collections::HashSet<String> {
@@ -434,6 +429,9 @@ pub struct Engine {
 }
 
 pub fn load_model(model_path: &str) -> Result<Engine, Box<dyn std::error::Error>> {
+    if let Err(e) = crate::model_integrity::verify_model_integrity(model_path) {
+        return Err(e.into());
+    }
     let backend = LlamaBackend::init()?;
     let params = LlamaModelParams::default().with_n_gpu_layers(99);
     let model = LlamaModel::load_from_file(&backend, &PathBuf::from(model_path), &params)?;
