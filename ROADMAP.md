@@ -23,7 +23,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1.1 | Confirm live daemon runs **fe5087e** binary (`jett status`, restart if stale) | [x] | PID active, binary Jun 14 01:58, HEAD fe5087e |
+| 1.1 | Confirm live daemon runs current **main** binary (`jett status`, restart if stale) | [x] | nyx-cosmic deploy complete @ `d3be3f1` |
 | 1.2 | Confirm **learn mode** (not enforce) in `/etc/default/jett` | [x] | Default learn; no JETT_MODE=enforce in unit |
 | 1.3 | **Stop RunPod pod** if still running | [x] | Connection refused — pod already down |
 | 1.4 | Learn-mode **soak** (1–2 weeks, watch `/var/log/jett/jett.log`) | [~] | Ongoing; harvest FPs |
@@ -94,22 +94,22 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 
 Vision: jeTT as a **fully offline SOC-on-host** — kernel telemetry → live risk graph → ATT&CK-mapped chains → confidence-calibrated response → tamper-proof evidence — with optional privacy-preserving fleet intel.
 
-| # | Capability | Status | Today / next step |
-|---|------------|--------|-------------------|
-| 7.1 | **Kernel-to-LLM real-time risk graph** | [ ] | Partial: `ProcessEvent` → behavior → guard; no graph store or edge scoring |
-| 7.2 | **Attack-chain detection** (sequence, ATT&CK-mapped) | [ ] | Partial: `spawned_children` / outbound in prompt only; no chain engine |
-| 7.3 | **Autonomous response tiers** (log / contain / kill+quarantine) | [~] | Learn vs enforce + `JETT_ENFORCE_DRY_RUN`; add contain tier (cgroup/net ns) |
-| 7.4 | **Adaptive baseline + drift-aware anomaly** | [ ] | Net-new; harvest learn log as seed corpus |
-| 7.5 | **eBPF + BPF LSM hybrid** (observe + enforce) | [~] | eBPF scaffold (`JETT_TELEMETRY=both`); LSM hooks not started — see `docs/jeTT-eBPF-Integration-Plan-v2.md` |
-| 7.6 | **Memory / syscall intent fingerprinting** | [ ] | Net-new; extend behavior pipeline beyond /proc snapshot |
-| 7.7 | **Tamper-resistant append-only evidence vault** | [~] | Quarantine copies + logs; not append-only or signed |
-| 7.8 | **Deterministic explainability** on every verdict | [~] | Hard rules + reasons; model path still opaque — require rule id / evidence refs |
-| 7.9 | **Built-in red-team / adversary simulation** | [~] | `art_jett_smoke.sh`, `enforce_smoke.sh`, adversarial eval; unify as `jett redteam` mode |
-| 7.10 | **Detector Plugin SDK** (Rust / C / Go) | [ ] | Net-new; WASM or IPC plugin host after core graph stable |
-| 7.11 | **Fully offline SOC-on-host** | [~] | Local GGUF + rules; document air-gap install; no cloud dependency |
-| 7.12 | **Self-optimizing probe manager** (load / threat adaptive) | [ ] | Net-new; ties to 7.5 + AI funnel backpressure (eBPF plan §3) |
-| 7.13 | **Confidence-calibrated autonomous response** | [ ] | Net-new; score from rules + model + chain context → tier pick |
-| 7.14 | **Privacy-preserving cross-host intel federation** | [ ] | Net-new; Cerberus / fleet layer; no raw telemetry export |
+| # | Capability | Status | Module / notes |
+|---|------------|--------|----------------|
+| 7.1 | **Kernel-to-LLM real-time risk graph** | [~] | `src/risk_graph.rs` — in-memory graph, wired in `tier7_hooks` |
+| 7.2 | **Attack-chain detection** (sequence, ATT&CK-mapped) | [~] | `src/attack_chain.rs` — T1059, T1071, T1027, T1548, T1105 |
+| 7.3 | **Autonomous response tiers** (log / contain / kill+quarantine) | [~] | `src/response.rs` — contain is placeholder |
+| 7.4 | **Adaptive baseline + drift-aware anomaly** | [~] | `src/baseline.rs` → `/var/jett/baseline.json` |
+| 7.5 | **eBPF + BPF LSM hybrid** (observe + enforce) | [~] | eBPF scaffold; `docs/EBPF_LSM_ROADMAP.md` — LSM not started |
+| 7.6 | **Memory / syscall intent fingerprinting** | [~] | `src/syscall_fingerprint.rs` — heuristic from behavior string |
+| 7.7 | **Tamper-resistant append-only evidence vault** | [~] | `src/evidence_vault.rs` — hash-chained JSONL |
+| 7.8 | **Deterministic explainability** on every verdict | [~] | `src/explain.rs` — appended to verdict logs |
+| 7.9 | **Built-in red-team / adversary simulation** | [~] | `scripts/jett_redteam.sh`, ART + adversarial eval |
+| 7.10 | **Detector Plugin SDK** (Rust / C / Go) | [~] | `src/plugin.rs`, `docs/PLUGIN_SDK.md` — static host only |
+| 7.11 | **Fully offline SOC-on-host** | [x] | Local GGUF + rules; air-gap notes in `INSTALL.md` |
+| 7.12 | **Self-optimizing probe manager** (load / threat adaptive) | [~] | `src/probe_manager.rs` |
+| 7.13 | **Confidence-calibrated autonomous response** | [~] | `src/confidence.rs` → `select_response_tier` |
+| 7.14 | **Privacy-preserving cross-host intel federation** | [~] | `src/federation.rs` — bloom-filter stub |
 
 ### Suggested build order (after Tier 3 ship)
 
