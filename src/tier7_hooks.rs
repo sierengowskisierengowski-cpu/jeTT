@@ -101,13 +101,15 @@ pub fn process_verdict(ctx: &VerdictContext) -> Tier7Outcome {
     );
 
     if let Ok(mut vault) = evidence_vault().lock() {
-        let _ = vault.append(
+        if let Err(e) = vault.append(
             ctx.event.timestamp,
             ctx.event.pid,
             &ctx.verdict_label,
             &explanation.summary(),
             &ctx.event_str.chars().take(512).collect::<String>(),
-        );
+        ) {
+            eprintln!("[jett] evidence vault append failed: {}", e);
+        }
     }
 
     if ctx.verdict_label.contains("ALLOW") {

@@ -26,8 +26,8 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 | 1.1 | Confirm live daemon runs current **main** binary (`jett status`, restart if stale) | [x] | nyx-cosmic deploy complete @ `d3be3f1` |
 | 1.2 | Confirm **learn mode** (not enforce) in `/etc/default/jett` | [x] | Default learn; no JETT_MODE=enforce in unit |
 | 1.3 | **Stop RunPod pod** if still running | [x] | Connection refused — pod already down |
-| 1.4 | Learn-mode **soak** (1–2 weeks, watch `/var/log/jett/jett.log`) | [~] | Ongoing; harvest FPs |
-| 1.5 | Run `harvest_learn_log.py` weekly → candidate rows for v7 eval | [ ] | After soak starts |
+| 1.4 | Learn-mode **soak** (1–2 weeks, watch `/var/log/jett/jett.log`) | [~] | **Active on nyx-cosmic** — do not switch to enforce |
+| 1.5 | Run `scripts/weekly_harvest.sh` weekly → candidate rows for v7 eval | [~] | Script + cron example in header |
 
 ---
 
@@ -49,7 +49,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | 3.1 | GitHub Actions: build `jeTT` + `jett-daemon` (CUDA/NCCL) | [~] | `.github/workflows/ci.yml` — lib tests + CPU bin build; CUDA needs self-hosted / local |
-| 3.2 | Create **GitHub Release** assets (tarball + checksums) | [~] | `release.yml` + `scripts/build_release.sh`; first `v*` tag pending |
+| 3.2 | Create **GitHub Release** assets (tarball + checksums) | [x] | Tag **`v0.1.0`**; build via `scripts/build_release.sh` |
 | 3.3 | Wire **`install.sh`** to releases (binaries + systemd + default config) | [x] | Release download + **local build fallback** when no assets |
 | 3.4 | Model download step (GGUF separate or bundled) + license note | [~] | Documented in INSTALL.md — not bundled (size/legal) |
 | 3.5 | Post-install: `jett smoke` + learn mode defaults | [x] | `scripts/post_install_smoke.sh` + `scripts/deploy_walkthrough.sh` |
@@ -124,7 +124,9 @@ Vision: jeTT as a **fully offline SOC-on-host** — kernel telemetry → live ri
 
 ## Current focus
 
-**Next item:** **3.2** — tag first release (`v0.1.0`) and verify `install.sh` download path; CUDA assets via local `build_release.sh` on GPU host.
+**Next item:** **1.5** — weekly `scripts/weekly_harvest.sh` during learn soak; **Tier 7 hardening** (eBPF prod, real contain tier).
+
+**Architecture:** [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md)
 
 ---
 

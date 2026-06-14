@@ -41,3 +41,13 @@ sudo systemctl restart jett-daemon
 ```
 
 Full walkthrough: `bash scripts/deploy_walkthrough.sh`
+
+## Learn soak + weekly harvest
+
+Keep `JETT_MODE=learn` for 1–2 weeks. Harvest false positives weekly:
+
+```bash
+bash ~/Projects/jeTT/scripts/weekly_harvest.sh
+```
+
+Cron example (Sundays 03:00): see script header in `scripts/weekly_harvest.sh`.

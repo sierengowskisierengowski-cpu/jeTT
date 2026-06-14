@@ -38,6 +38,12 @@ pub struct RiskGraph {
     parent_of: HashMap<u32, u32>,
 }
 
+/// Max nodes retained; oldest by timestamp evicted under pressure.
+#[cfg(test)]
+const MAX_GRAPH_NODES: usize = 64;
+#[cfg(not(test))]
+const MAX_GRAPH_NODES: usize = 4096;
+
 impl Default for RiskGraph {
     fn default() -> Self {
         Self::new()
@@ -102,6 +108,27 @@ impl RiskGraph {
                 weight: 0.6,
             });
         }
+
+        self.enforce_capacity();
+    }
+
+    fn enforce_capacity(&mut self) {
+        if self.nodes.len() <= MAX_GRAPH_NODES {
+            return;
+        }
+        let mut by_time: Vec<(u32, u64)> = self
+            .nodes
+            .iter()
+            .map(|(pid, n)| (*pid, n.timestamp))
+            .collect();
+        by_time.sort_by_key(|(_, ts)| *ts);
+        let drop_n = self.nodes.len().saturating_sub(MAX_GRAPH_NODES);
+        for (pid, _) in by_time.into_iter().take(drop_n) {
+            self.nodes.remove(&pid);
+            self.parent_of.remove(&pid);
+        }
+        self.edges
+            .retain(|e| self.nodes.contains_key(&e.from_pid) && self.nodes.contains_key(&e.to_pid));
     }
 
     /// Score a PID subtree by summing quarantine-weighted node + edge risk.
@@ -217,5 +244,16 @@ mod tests {
         let json = g.export_json();
         assert!(json.contains("\"nodes\""));
         let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn evicts_oldest_when_over_capacity() {
+        let mut g = RiskGraph::new();
+        for i in 0..(MAX_GRAPH_NODES + 10) {
+            let mut e = sample_event(i as u32, "/bin/true");
+            e.timestamp = i as u64;
+            g.record_event(&e, "✅ ALLOW", "", None);
+        }
+        assert!(g.node_count() <= MAX_GRAPH_NODES);
     }
 }

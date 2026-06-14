@@ -9,6 +9,10 @@ use std::path::Path;
 const DEFAULT_VAULT_PATH: &str = "/var/jett/evidence/vault.jsonl";
 const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
+fn vault_path_from_env() -> String {
+    std::env::var("JETT_EVIDENCE_VAULT").unwrap_or_else(|_| DEFAULT_VAULT_PATH.to_string())
+}
+
 /// Record appended to the evidence vault.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VerdictRecord {
@@ -29,7 +33,9 @@ pub struct EvidenceVault {
 
 impl EvidenceVault {
     pub fn new(path: Option<&str>) -> Self {
-        let path = path.unwrap_or(DEFAULT_VAULT_PATH).to_string();
+        let path = path
+            .map(|s| s.to_string())
+            .unwrap_or_else(vault_path_from_env);
         let last_hash = Self::load_last_hash(&path).unwrap_or_else(|| GENESIS_HASH.to_string());
         Self { path, last_hash }
     }
@@ -94,6 +100,7 @@ impl EvidenceVault {
             .append(true)
             .open(&self.path)?;
         file.write_all(line.as_bytes())?;
+        file.sync_all()?;
 
         self.last_hash = entry_hash;
         Ok(record)

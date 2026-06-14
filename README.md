@@ -68,6 +68,8 @@ See [docs/ART.md](docs/ART.md) for the learn-mode smoke harness.
 - [STATUS.md](STATUS.md) — what ships today vs planned
 - [INSTALL.md](INSTALL.md) — build prerequisites and runtime env
 - [ROADMAP.md](ROADMAP.md) — prioritized delivery checklist
+- [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) — **why** key architectural choices
+- [docs/RELEASE_v0.1.0.md](docs/RELEASE_v0.1.0.md) — first production release notes
 
 ## License
 

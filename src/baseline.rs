@@ -9,6 +9,10 @@ use std::path::Path;
 const DEFAULT_BASELINE_PATH: &str = "/var/jett/baseline.json";
 const MAX_TOKENS: usize = 4096;
 
+fn baseline_path_from_env() -> String {
+    std::env::var("JETT_BASELINE_PATH").unwrap_or_else(|_| DEFAULT_BASELINE_PATH.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct BaselineState {
     token_counts: HashMap<String, u32>,
@@ -29,7 +33,9 @@ impl Default for Baseline {
 
 impl Baseline {
     pub fn new(path: Option<&str>) -> Self {
-        let path = path.unwrap_or(DEFAULT_BASELINE_PATH).to_string();
+        let path = path
+            .map(|s| s.to_string())
+            .unwrap_or_else(baseline_path_from_env);
         let state = fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())

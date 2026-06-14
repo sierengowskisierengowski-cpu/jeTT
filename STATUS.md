@@ -1,6 +1,6 @@
 # jeTT Status
 
-**Last updated:** 2026-06-14 · **Git:** `main` @ `d3be3f1` · **Remote:** https://github.com/sierengowskisierengowski-cpu/jeTT
+**Last updated:** 2026-06-14 · **Git:** `main` · **Release:** `v0.1.0` · **Remote:** https://github.com/sierengowskisierengowski-cpu/jeTT
 
 ---
 
@@ -48,9 +48,9 @@ All product code through Tier 2, Tier 3 scaffolding, and Tier 7 foundation modul
 | Tier | Status |
 |------|--------|
 | 0 — Architecture | **100%** |
-| 1 — Lock production | Soak ongoing (1.4); harvest weekly (1.5) pending |
+| 1 — Lock production | **Soak active** (1.4); weekly harvest script (1.5) |
 | 2 — Public blockers | **100%** |
-| 3 — Installer/releases | CI + scripts in repo; **first `v0.1.0` tag pending** |
+| 3 — Installer/releases | **v0.1.0 tagged**; CI + `install.sh` + release scripts |
 | 4 — Model/training | Policy locked; v7 harvest after soak |
 | 5–6 | Planned |
 | 7 — North Star | Foundation modules wired; hardening ongoing |
@@ -67,12 +67,16 @@ All product code through Tier 2, Tier 3 scaffolding, and Tier 7 foundation modul
 
 Real-world coverage expands via learn-mode harvest → v7 eval set.
 
+## Architecture decisions
+
+**[docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md)** — why NEVER_FAST_TRUST, connection attribution, max_tokens, no full retrains, and more.
+
 ---
 
 ## Next (optional, not blocking prod)
 
-1. Tag **`v0.1.0`** + GitHub Release (`scripts/build_release.sh`)
-2. Weekly `scripts/harvest_learn_log.py` during soak
-3. eBPF production path, enforce on secondary test host only
+1. Weekly `bash scripts/weekly_harvest.sh` during soak
+2. eBPF production path, enforce on secondary test host only
+3. Continue Tier 7 hardening
 
-See `ROADMAP.md` for full checklist.
+Release **v0.1.0** tagged. See `docs/RELEASE_v0.1.0.md`.
