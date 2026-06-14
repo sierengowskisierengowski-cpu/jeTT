@@ -36,7 +36,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | 2.1 | **Externalize own-stack allowlist** (`/etc/jett/allowlist.conf` + `JETT_ALLOWLIST`) | [x] | `allowlist_config.rs` + `config/allowlist.example.conf` |
-| 2.2 | **Externalize daemon trusted/toolchain lists** (same config) | [ ] | Same file or `jett.toml` |
+| 2.2 | **Externalize daemon trusted/toolchain lists** (same config file) | [x] | `trusted_path/proc`, `toolchain_*` in allowlist.conf |
 | 2.3 | Model path + **GGUF integrity check** at startup (sha256) | [ ] | Tamper detection |
 | 2.4 | **Adversarial eval set** + CI tests (prompt injection can't flip verdict) | [ ] | Extend `adversarial.rs` coverage |
 | 2.5 | **Enforce mode** smoke/ART suite before any enforce deploy | [ ] | Real kills |
@@ -92,7 +92,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 
 ## Current focus
 
-**Next item:** **2.2** — Externalize daemon trusted/toolchain lists.
+**Next item:** **2.3** — GGUF integrity check at startup.
 
 ---
 

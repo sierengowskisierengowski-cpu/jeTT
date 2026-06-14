@@ -9,10 +9,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
 use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
 use jeTT::telemetry::{
-    detect_evasion, hard_quarantine_reason, honeypot_enabled, log_deception_audit, max_event_len,
-    matches_never_fast_trust, normalize_proc_name, own_stack_fast_allow, parse_telemetry_mode,
-    plausible_allow_reason,
-    should_decoy_allow, stat_inode, telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
+    detect_evasion, daemon_is_trusted, hard_quarantine_reason, honeypot_enabled,
+    log_deception_audit, max_event_len, normalize_proc_name, own_stack_fast_allow,
+    parse_telemetry_mode, plausible_allow_reason, should_decoy_allow, stat_inode,
+    telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
 };
 #[cfg(feature = "ebpf")]
 use jeTT::telemetry::{
@@ -34,76 +34,6 @@ const DEFAULT_BRAND_MODEL: &str = "IBM Granite 3.3 2B";
 const DEFAULT_BRAND_HARDWARE: &str = "RTX 3060";
 const BANNER_CONTENT_WIDTH: usize = 39;
 const LOG_WRITE_LIMIT_PER_SECOND: u32 = 100;
-
-// Trusted paths — instant ALLOW, no AI needed
-const TRUSTED_PATHS: &[&str] = &[
-    "/home/cosmic/Projects/",
-    "/home/cosmic/Scripts/",
-    "/usr/bin/",
-    "/usr/lib/",
-    "/usr/share/",
-    "/etc/systemd/",
-    "/opt/jett/",
-];
-
-// Trusted process names — instant ALLOW
-const TRUSTED_PROCS: &[&str] = &[
-    "bifrost",
-    "ollama",
-    "docker",
-    "cowrie",
-    "prometheus",
-    "grafana",
-    "loki",
-    "promtail",
-    "portainer",
-    "mosquitto",
-    "cosmic-comp",
-    "cargo",
-    "rclone",
-    "meshtastic",
-    "gni_server",
-    "systemd",
-    "sshd",
-    "pacman",
-    "yay",
-    "jett",
-    "wireguard",
-    "wg",
-    "tmux",
-    "screen",
-    "rustc",
-    "cc1plus",
-    "cc1",
-    "cicc",
-    "nvcc",
-    "ptxas",
-    "fatbinary",
-    "cmake",
-    "make",
-    "ccache",
-    "collect2",
-    "electron",
-    "git",
-    "cursorsandbox",
-];
-
-/// Build-tree / compiler subprocesses — comm is often truncated (`a`, `ary`, `++`).
-const TOOLCHAIN_EXE_MARKERS: &[&str] = &[
-    "/target/release/build/",
-    "/target/debug/build/",
-    "cursor-sandbox-cache",
-    "/cargo-target/",
-    "/usr/lib/ccache/",
-    "/usr/lib/gcc/",
-    "/usr/lib/rustlib/",
-];
-
-const TOOLCHAIN_BIN_NAMES: &[&str] = &[
-    "as", "ld", "gcc", "g++", "c++", "cc1", "cc1plus", "collect2", "cicc", "nvcc", "ptxas",
-    "fatbinary", "rustc", "cargo", "cmake", "make", "ccache", "rustc", "git", "electron",
-    "cursorsandbox", "ld.lld", "clang", "clang++",
-];
 
 // Suspicious indicators — immediate flag for AI analysis
 const SUSPICIOUS_LITERALS: &[&str] = &[
@@ -317,10 +247,6 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
     })
 }
 
-fn is_never_fast_trust(event: &ProcessEvent) -> bool {
-    matches_never_fast_trust(&event.name) || matches_never_fast_trust(&event.exe_path)
-}
-
 fn classify_event(event: &ProcessEvent) -> ProcessDisposition {
     if is_suspicious(event) {
         ProcessDisposition::Suspicious
@@ -335,56 +261,8 @@ fn classify_event(event: &ProcessEvent) -> ProcessDisposition {
     }
 }
 
-fn is_toolchain_build(event: &ProcessEvent) -> bool {
-    let exe_lower = event.exe_path.to_lowercase();
-    if TOOLCHAIN_EXE_MARKERS.iter().any(|m| exe_lower.contains(m)) {
-        return true;
-    }
-    let base = normalize_proc_name(
-        Path::new(&event.exe_path)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&event.name),
-    );
-    if TOOLCHAIN_BIN_NAMES
-        .iter()
-        .any(|n| base == *n || base.starts_with(n))
-        && (exe_lower.starts_with("/usr/")
-            || exe_lower.contains("/target/")
-            || exe_lower.contains("sandbox-cache")
-            || exe_lower.contains("/build/"))
-    {
-        return true;
-    }
-    // Truncated comm from cargo build-script / linker temps in build dirs.
-    (event.name.len() <= 4 || event.name == "++")
-        && (exe_lower.contains("/target/")
-            || exe_lower.contains("sandbox-cache")
-            || exe_lower.contains("/build/"))
-}
-
 fn is_trusted(event: &ProcessEvent) -> bool {
-    if is_never_fast_trust(event) {
-        return false;
-    }
-
-    if is_toolchain_build(event) {
-        return true;
-    }
-
-    for trusted in TRUSTED_PROCS {
-        if event.name.contains(trusted) || event.cmdline.contains(trusted) {
-            return true;
-        }
-    }
-
-    for path in TRUSTED_PATHS {
-        if event.exe_path.starts_with(path) || event.cmdline.contains(path) {
-            return true;
-        }
-    }
-
-    false
+    daemon_is_trusted(event)
 }
 
 fn contains_pipe_to_shell(command: &str, downloader: &str) -> bool {
