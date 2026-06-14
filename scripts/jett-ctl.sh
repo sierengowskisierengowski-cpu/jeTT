@@ -120,7 +120,7 @@ status_block() {
     echo -e "  Daemon   ${RED}● stopped${NC}"
   fi
   echo -e "  Mode     $(mode_label)"
-  echo -e "  Telemetry ${telemetry_label}"
+  echo -e "  Telemetry $(telemetry_label)"
   if [[ -f "$model" ]]; then
     echo -e "  Model    ${DIM}$(basename "$model")${NC}"
   else

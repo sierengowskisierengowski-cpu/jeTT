@@ -10,7 +10,8 @@ use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard a
 use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
 use jeTT::telemetry::{
     detect_evasion, hard_quarantine_reason, honeypot_enabled, log_deception_audit, max_event_len,
-    matches_never_fast_trust, normalize_proc_name, parse_telemetry_mode, plausible_allow_reason,
+    matches_never_fast_trust, normalize_proc_name, own_stack_fast_allow, parse_telemetry_mode,
+    plausible_allow_reason,
     should_decoy_allow, stat_inode, telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
 };
 #[cfg(feature = "ebpf")]
@@ -857,6 +858,18 @@ fn handle_suspicious_inline(
     if let Some(rule) = hard_quarantine_reason(&event_str) {
         let reason = format!("🚨 QUARANTINE | hard rule: {}", rule);
         let verdict = finalize_ai_verdict(event, &event_str, reason, enforce_mode, engine, t);
+        log_verdict(&verdict);
+        return;
+    }
+
+    if own_stack_fast_allow(&event_str) {
+        let verdict = JettVerdict {
+            verdict: "✅ ALLOW".to_string(),
+            reason: "own-stack (hard allow)".to_string(),
+            elapsed_ms: t.elapsed().as_millis() as u64,
+            event,
+            honey_decoy: false,
+        };
         log_verdict(&verdict);
         return;
     }

