@@ -1,4 +1,5 @@
 pub mod adversarial;
+pub mod allowlist_config;
 pub mod config;
 pub mod coordinator;
 pub mod event;

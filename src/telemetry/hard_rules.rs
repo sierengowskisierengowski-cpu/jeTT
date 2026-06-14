@@ -1,26 +1,10 @@
-//! Non-negotiable quarantine signals — before TRUSTED_PATH bypass and model inference.
-//! Own-stack ALLOW uses exe path prefix (+ anchored pip/php-fpm) only — never comm/name alone.
+//! Own-stack ALLOW uses config file or `$HOME` defaults — see `allowlist_config.rs`.
 
+use super::allowlist_config::{exe_has_own_stack_prefix, python3_script_cmdline_allowed};
 use super::event::{normalize_proc_name, parse_guard_event_fields};
 use super::never_fast_trust::matches_never_fast_trust;
 
 const SCRATCH_PREFIXES: &[&str] = &["/tmp/", "/dev/shm/", "/var/tmp/"];
-
-/// Eval-scoped ALLOW floor — exe prefix match only (see guard eval v6 legit_scary misses).
-const OWN_STACK_EXE_PREFIXES: &[&str] = &[
-    "/home/cosmic/Scripts/utilities/",
-    "/home/cosmic/Scripts/deployed/",
-    "/home/cosmic/Projects/GNI/",
-    "/home/cosmic/Projects/jeTT/",
-    "/home/cosmic/Projects/bifrost/",
-    "/home/cosmic/Projects/c2/",
-    "/home/cosmic/Projects/meli-fresh/",
-    "/home/cosmic/Projects/honeypot/",
-    "/home/cosmic/.local/share/Steam/",
-    "/tmp/cargo-install",
-    "/home/cosmic/.cargo/",
-    "/home/cosmic/.rustup/",
-];
 
 pub fn parse_guard_cmdline(event: &str) -> String {
     event
@@ -54,12 +38,6 @@ fn comm_is(comm: &str, name: &str) -> bool {
     normalize_proc_name(comm) == name
 }
 
-fn exe_has_own_stack_prefix(exe_path: &str) -> bool {
-    OWN_STACK_EXE_PREFIXES
-        .iter()
-        .any(|prefix| exe_path.starts_with(prefix))
-}
-
 fn is_malicious_pip(cmdline: &str, event: &str) -> bool {
     let lower = format!("{} {}", cmdline, event).to_lowercase();
     lower.contains("evil-pypi")
@@ -85,10 +63,8 @@ fn is_webshell_php_exe(exe_path: &str) -> bool {
     exe_path.starts_with("/var/www/html/.shell.php") || exe_path.contains("/.shell.php")
 }
 
-fn is_python3_cosmic_script(exe_path: &str, cmdline: &str) -> bool {
-    exe_path == "/usr/bin/python3"
-        && (cmdline.starts_with("/home/cosmic/Scripts/")
-            || cmdline.starts_with("python3 /home/cosmic/Scripts/"))
+fn is_python3_own_script(exe_path: &str, cmdline: &str) -> bool {
+    python3_script_cmdline_allowed(exe_path, cmdline)
 }
 
 fn own_stack_allow_fields(_comm: &str, exe_path: &str, cmdline: &str, event: &str) -> bool {
@@ -109,7 +85,7 @@ fn own_stack_allow_fields(_comm: &str, exe_path: &str, cmdline: &str, event: &st
     if is_benign_pip_python3(exe_path, cmdline, event) {
         return true;
     }
-    if is_python3_cosmic_script(exe_path, cmdline) {
+    if is_python3_own_script(exe_path, cmdline) {
         return true;
     }
     if is_legit_php_fpm(exe_path) {
