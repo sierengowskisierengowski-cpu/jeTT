@@ -2,47 +2,74 @@
 
 ## Prerequisites
 
-- Linux
+- Linux (x86_64)
 - Rust toolchain
 - CMake and a C/C++ compiler
-- CUDA Toolkit, because the Rust model backend is built with `llama-cpp-2` CUDA support
-- Go 1.22+ for any Go-based control-plane services
+- CUDA Toolkit — `llama-cpp-2` is built with CUDA support
+- NVIDIA driver + NCCL libs for release builds (`RUSTFLAGS="-L /usr/lib -l nccl"` if needed)
 
-## Rust components
-
-Build the Rust binaries:
+## Build from source
 
 ```bash
-cargo build --release
+cargo build --release --features ebpf
 ```
 
-Build just the daemon:
+Binaries: `target/release/jeTT`, `target/release/jett-daemon`. Wrapper: `./jett` → `scripts/jett-ctl.sh`.
 
 ```bash
-cargo build --release --bin jett-daemon
+cargo test --lib
 ```
 
-Run the local test suite:
+## Runtime configuration
+
+Create `/etc/default/jett` (or edit after `install.sh`):
 
 ```bash
-cargo test
+JETT_MODEL=/opt/jett/models/jett-r6-q4_k_m.gguf
+JETT_MODE=learn                    # learn | enforce
+JETT_TELEMETRY=both                # proc | ebpf | both
+JETT_ALLOWLIST=/etc/jett/allowlist.conf
+JETT_MODEL_PIN=/etc/jett/model.sha256
+# JETT_ENFORCE_DRY_RUN=1          # safe enforce smoke only — not for production enforce
 ```
 
-## Go components
-
-When the Go control-plane module is present, build it from that module directory:
+Install supporting files:
 
 ```bash
-go build ./...
+sudo ./scripts/install_allowlist.sh
+sudo JETT_MODEL="$JETT_MODEL" ./scripts/pin_model.sh
 ```
 
-Run Go tests:
+Systemd unit: `jett-daemon.service` (reads `EnvironmentFile=-/etc/default/jett`).
 
 ```bash
-go test ./...
+sudo cp jett-daemon.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now jett-daemon
 ```
 
-## Runtime notes
+## Post-install checks
 
-- Set `JETT_MODEL` to the GGUF model path before running the binaries.
-- The daemon expects the `jeTT` binary path to be available through `JETT_BIN` or the service configuration.
+```bash
+./jett status
+./jett smoke                       # learn-mode ART atoms
+./scripts/enforce_smoke.sh --enforce-check   # after enforce+dry-run config
+```
+
+## Release install (when available)
+
+```bash
+sudo bash install.sh
+```
+
+Downloads latest GitHub release assets for `jeTT` and `jett-daemon`. Model GGUF is separate — set `JETT_MODEL` after install.
+
+## Eval (optional)
+
+```bash
+sudo systemctl stop jett-daemon    # free GPU
+python3 eval_guard.py --eval tests/guard_eval_v6.jsonl
+./scripts/run_adversarial_eval.sh
+```
+
+See [TRAINING.md](TRAINING.md) for dataset and fine-tune workflows.

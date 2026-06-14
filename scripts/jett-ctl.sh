@@ -297,6 +297,15 @@ cmd_smoke() {
   bash "$script"
 }
 
+cmd_smoke_enforce() {
+  local script="${REPO_ROOT}/scripts/enforce_smoke.sh"
+  if [[ ! -x "$script" ]]; then
+    echo -e "${RED}[!] missing ${script}${NC}"
+    return 1
+  fi
+  bash "$script" "$@"
+}
+
 cmd_demo() {
   local engine model
   engine="$(resolve_engine_bin)"
@@ -330,6 +339,7 @@ jeTT control panel
   jett config           Show runtime env file
   jett rebuild          cargo build --release --features ebpf
   jett smoke            Safe ART learn-mode smoke tests
+  jett smoke-enforce    Enforce dry-run smoke (--enforce-check for preflight)
   jett demo             Run built-in engine demo suite
 
 Engine CLI flags also work: jett --guard|--alert|--query|--trust|--list-trusted ...

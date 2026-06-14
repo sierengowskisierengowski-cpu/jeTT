@@ -39,8 +39,8 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 | 2.2 | **Externalize daemon trusted/toolchain lists** (same config file) | [x] | `trusted_path/proc`, `toolchain_*` in allowlist.conf |
 | 2.3 | Model path + **GGUF integrity check** at startup (sha256) | [x] | `model_integrity.rs`, `scripts/pin_model.sh` |
 | 2.4 | **Adversarial eval set** + CI tests (prompt injection can't flip verdict) | [x] | `tests/guard_eval_adversarial.jsonl`, `eval_guard.py --suite adversarial`, `scripts/run_adversarial_eval.sh` |
-| 2.5 | **Enforce mode** smoke/ART suite before any enforce deploy | [ ] | Real kills |
-| 2.6 | Fix **README / STATUS / INSTALL** (jeTT product, not "prototype") | [ ] | Public face |
+| 2.5 | **Enforce mode** smoke/ART suite before any enforce deploy | [x] | `scripts/enforce_smoke.sh`, `JETT_ENFORCE_DRY_RUN=1`, `src/enforce.rs` |
+| 2.6 | Fix **README / STATUS / INSTALL** (jeTT product, not "prototype") | [x] | Public face |
 
 ---
 
@@ -90,9 +90,41 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 
 ---
 
+## Tier 7 — North Star (enterprise differentiators)
+
+Vision: jeTT as a **fully offline SOC-on-host** — kernel telemetry → live risk graph → ATT&CK-mapped chains → confidence-calibrated response → tamper-proof evidence — with optional privacy-preserving fleet intel.
+
+| # | Capability | Status | Today / next step |
+|---|------------|--------|-------------------|
+| 7.1 | **Kernel-to-LLM real-time risk graph** | [ ] | Partial: `ProcessEvent` → behavior → guard; no graph store or edge scoring |
+| 7.2 | **Attack-chain detection** (sequence, ATT&CK-mapped) | [ ] | Partial: `spawned_children` / outbound in prompt only; no chain engine |
+| 7.3 | **Autonomous response tiers** (log / contain / kill+quarantine) | [~] | Learn vs enforce + `JETT_ENFORCE_DRY_RUN`; add contain tier (cgroup/net ns) |
+| 7.4 | **Adaptive baseline + drift-aware anomaly** | [ ] | Net-new; harvest learn log as seed corpus |
+| 7.5 | **eBPF + BPF LSM hybrid** (observe + enforce) | [~] | eBPF scaffold (`JETT_TELEMETRY=both`); LSM hooks not started — see `docs/jeTT-eBPF-Integration-Plan-v2.md` |
+| 7.6 | **Memory / syscall intent fingerprinting** | [ ] | Net-new; extend behavior pipeline beyond /proc snapshot |
+| 7.7 | **Tamper-resistant append-only evidence vault** | [~] | Quarantine copies + logs; not append-only or signed |
+| 7.8 | **Deterministic explainability** on every verdict | [~] | Hard rules + reasons; model path still opaque — require rule id / evidence refs |
+| 7.9 | **Built-in red-team / adversary simulation** | [~] | `art_jett_smoke.sh`, `enforce_smoke.sh`, adversarial eval; unify as `jett redteam` mode |
+| 7.10 | **Detector Plugin SDK** (Rust / C / Go) | [ ] | Net-new; WASM or IPC plugin host after core graph stable |
+| 7.11 | **Fully offline SOC-on-host** | [~] | Local GGUF + rules; document air-gap install; no cloud dependency |
+| 7.12 | **Self-optimizing probe manager** (load / threat adaptive) | [ ] | Net-new; ties to 7.5 + AI funnel backpressure (eBPF plan §3) |
+| 7.13 | **Confidence-calibrated autonomous response** | [ ] | Net-new; score from rules + model + chain context → tier pick |
+| 7.14 | **Privacy-preserving cross-host intel federation** | [ ] | Net-new; Cerberus / fleet layer; no raw telemetry export |
+
+### Suggested build order (after Tier 3 ship)
+
+1. **7.5 + 7.1** — eBPF production + event graph (foundation for chains and probes)
+2. **7.2 + 7.8** — ATT&CK chain matcher + structured explain records
+3. **7.3 + 7.13** — response tiers + confidence gating (extend `enforce.rs`)
+4. **7.7 + 7.9** — evidence vault + unified red-team mode
+5. **7.4 + 7.6 + 7.12** — baseline/drift, syscall fingerprints, adaptive probes
+6. **7.10 + 7.14** — plugin SDK, then optional federated intel
+
+---
+
 ## Current focus
 
-**Next item:** **2.5** — Enforce mode smoke/ART suite before any enforce deploy.
+**Next item:** **3.1** — GitHub Actions: build `jeTT` + `jett-daemon` (CUDA/NCCL).
 
 ---
 

@@ -13,17 +13,22 @@ FAIL=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/art_jett_smoke.sh [--dry-run]
+Usage: scripts/art_jett_smoke.sh [--dry-run | --enforce-check]
 
 Runs 15 safe, non-destructive Linux test atoms inspired by Atomic Red Team.
 Designed to validate jeTT learn-mode harvest (logs WOULD-quarantine, no kills).
+
+  --enforce-check   Preflight for enforce dry-run (delegates to enforce_smoke.sh)
 
 Environment:
   JETT_ART_PAUSE   Seconds between atoms (default: 2)
   JETT_ART_URL     Benign download target (default: https://example.com/)
 
-Prerequisites:
+Prerequisites (learn mode):
   jett-daemon running with JETT_MODE=learn (and ideally JETT_TELEMETRY=both)
+
+For enforce validation use scripts/enforce_smoke.sh instead (requires
+JETT_MODE=enforce + JETT_ENFORCE_DRY_RUN=1).
 
 EOF
 }
@@ -31,6 +36,10 @@ EOF
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
+fi
+
+if [[ "${1:-}" == "--enforce-check" ]]; then
+  exec bash "$(dirname "$0")/enforce_smoke.sh" --enforce-check
 fi
 
 DRY_RUN=0

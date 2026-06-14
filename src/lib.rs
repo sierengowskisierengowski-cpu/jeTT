@@ -1,3 +1,4 @@
+pub mod enforce;
 pub mod engine;
 pub mod model_integrity;
 pub mod pipeline;

@@ -6,6 +6,9 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use jeTT::enforce::{
+    enforce_dry_run, should_quarantine_kill, verdict_label_for_reason,
+};
 use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
 use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
 use jeTT::telemetry::{
@@ -424,6 +427,14 @@ fn append_log_line(path: &str, line: &str) {
 }
 
 fn quarantine_process(event: &ProcessEvent) {
+    if enforce_dry_run() {
+        println!(
+            "[*] ENFORCE DRY-RUN — would quarantine PID {} ({}) — no kill",
+            event.pid, event.name
+        );
+        return;
+    }
+
     let pid = event.pid.to_string();
     match Command::new("kill").args(["-9", &pid]).status() {
         Ok(status) if status.success() => {
@@ -619,22 +630,6 @@ fn profile_for_event(event: &ProcessEvent) -> String {
     }
 }
 
-fn verdict_label_for_reason(reason: &str, enforce_mode: bool) -> String {
-    if reason.starts_with("ERROR:") {
-        return "⚠️ REVIEW".to_string();
-    }
-    let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
-    if model_says_quarantine {
-        if enforce_mode {
-            "🚨 QUARANTINE".to_string()
-        } else {
-            "🟡 WOULD-QUARANTINE".to_string()
-        }
-    } else {
-        "✅ ALLOW".to_string()
-    }
-}
-
 fn finalize_ai_verdict(
     event: ProcessEvent,
     event_str: &str,
@@ -685,11 +680,18 @@ fn finalize_ai_verdict(
     } else {
         match verdict_label.as_str() {
             "🚨 QUARANTINE" => {
-                println!(
-                    "🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})",
-                    event.pid, event.name
-                );
-                quarantine_process(&event);
+                if should_quarantine_kill(enforce_mode) {
+                    println!(
+                        "🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})",
+                        event.pid, event.name
+                    );
+                    quarantine_process(&event);
+                } else {
+                    println!(
+                        "🚨 [AI VERDICT: QUARANTINE] dry-run PID {} ({}) — not killing",
+                        event.pid, event.name
+                    );
+                }
             }
             "🟡 WOULD-QUARANTINE" => {
                 println!(
@@ -706,7 +708,14 @@ fn finalize_ai_verdict(
 
     // Real enforcement even when public face is decoy ALLOW.
     if decoy && verdict_label.contains("QUARANTINE") && enforce_mode {
-        quarantine_process(&event);
+        if should_quarantine_kill(enforce_mode) {
+            quarantine_process(&event);
+        } else {
+            println!(
+                "[*] ENFORCE DRY-RUN — decoy path would quarantine PID {} — no kill",
+                event.pid
+            );
+        }
     }
 
     JettVerdict {
@@ -1036,7 +1045,11 @@ fn main() {
         .map(|m| m.eq_ignore_ascii_case("enforce"))
         .unwrap_or(false);
     if enforce_mode {
-        println!("[\u{26a0}] ENFORCE MODE — jeTT WILL kill quarantined processes");
+        if enforce_dry_run() {
+            println!("[\u{26a0}] ENFORCE MODE (DRY-RUN) — logs QUARANTINE but does NOT kill");
+        } else {
+            println!("[\u{26a0}] ENFORCE MODE — jeTT WILL kill quarantined processes");
+        }
     } else {
         println!("[\u{1f6e1}] LEARN MODE — jeTT logs would-kills but does NOT kill (set JETT_MODE=enforce to enable killing)");
     }
