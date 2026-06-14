@@ -1220,10 +1220,11 @@ fn main() {
                     handle_suspicious_inline(event, enforce_mode, &mut guard_ctx, &engine);
                 }
                 ProcessDisposition::Unknown => {
+                    let exe = event.exe_path.clone();
                     let verdict = simple_verdict(
                         event,
                         "⚠️  REVIEW".to_string(),
-                        format!("Unknown process: {}", event.exe_path),
+                        format!("Unknown process: {}", exe),
                         t.elapsed().as_millis() as u64,
                         enforce_mode,
                     );
