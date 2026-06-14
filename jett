@@ -1,28 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Resolve real repo root even when this script is symlinked from /usr/local/bin
+if [[ -n "${JETT_REPO:-}" ]]; then
+  REPO_ROOT="$(cd "${JETT_REPO}" && pwd)"
+else
+  SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+  REPO_ROOT="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+fi
+CTL="${REPO_ROOT}/scripts/jett-ctl.sh"
+
 resolve_engine_bin() {
   if [[ -n "${JETT_ENGINE_BIN:-}" ]]; then
     printf '%s\n' "${JETT_ENGINE_BIN}"
     return
   fi
-
-  local repo_root
-  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [[ -x "${repo_root}/target/release/jeTT" ]]; then
-    printf '%s\n' "${repo_root}/target/release/jeTT"
-  elif [[ -x "/usr/lib/jett/jeTT" ]]; then
-    printf '%s\n' "/usr/lib/jett/jeTT"
-  else
+  if [[ -x "${REPO_ROOT}/target/release/jeTT" ]]; then
+    printf '%s\n' "${REPO_ROOT}/target/release/jeTT"
+  elif [[ -x "/usr/local/lib/jett/jeTT" ]]; then
     printf '%s\n' "/usr/local/lib/jett/jeTT"
+  else
+    printf '%s\n' "/usr/lib/jett/jeTT"
   fi
 }
 
 ENGINE_BIN="$(resolve_engine_bin)"
-CONTROL_PANEL_BIN="${JETT_CONTROL_PANEL_BIN:-$ENGINE_BIN}"
 
-if [[ $# -eq 0 ]]; then
-  exec "${CONTROL_PANEL_BIN}"
-fi
+# Control-panel subcommands
+case "${1:-}" in
+  ""|menu|panel)
+    exec "${CTL}" menu
+    ;;
+  start|stop|restart|status|logs|audit|quarantine|quar|config|cfg|mode|model|rebuild|build|smoke|art|demo|help|-h|--help)
+    exec "${CTL}" "$@"
+    ;;
+  guard|alert|query)
+    exec "${CTL}" "$@"
+    ;;
+esac
 
+# Pass through to Rust engine (--guard, --trust, etc.)
 exec "${ENGINE_BIN}" "$@"

@@ -2,6 +2,7 @@ pub mod adversarial;
 pub mod config;
 pub mod coordinator;
 pub mod event;
+pub mod hard_rules;
 pub mod never_fast_trust;
 pub mod stats;
 
@@ -19,5 +20,6 @@ pub use event::{
     normalize_proc_name, parse_guard_event_fields, proc_name_from_exe, stat_inode, EventSource,
     ProcessEvent, JETT_EVT_EXEC,
 };
+pub use hard_rules::{hard_quarantine_reason, parse_guard_cmdline};
 pub use never_fast_trust::{guard_event_skips_fast_trust, matches_never_fast_trust, NEVER_FAST_TRUST};
 pub use stats::TelemetryStats;

@@ -26,6 +26,7 @@ run_one() {
 }
 
 run_one "${JETT_MODEL_R6:-models/jett-r6-q4_k_m.gguf}" tests/guard_eval_v6.jsonl r6
+run_one "${JETT_MODEL_R6PLUS:-models/jett-r6plus-q4_k_m.gguf}" tests/guard_eval_v6.jsonl r6plus
 run_one "${JETT_MODEL_R7:-models/jett-r7-q4_k_m.gguf}" tests/guard_eval_v7.jsonl r7
 run_one "${JETT_MODEL_R8:-models/jett-r8-q4_k_m.gguf}" tests/guard_eval_v8.jsonl r8
 run_one "${JETT_MODEL_R9:-models/jett-r9-q4_k_m.gguf}" tests/guard_eval_v9.jsonl r9

@@ -1,4 +1,7 @@
 target/
+.cargo-target/
+outputs/
+backups/
 *.gguf
 *.gz
 models/

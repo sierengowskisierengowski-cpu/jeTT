@@ -106,6 +106,16 @@ def main():
         default=os.getenv("JETT_SKIP_GGUF", "").strip() in ("1", "true", "yes"),
         help="Stop after LoRA checkpoint (use scripts/export_gguf_pod.sh on RunPod)",
     )
+    parser.add_argument(
+        "--lora-adapter",
+        default=os.getenv("JETT_LORA_ADAPTER", "").strip() or None,
+        help="Continue training from an existing LoRA checkpoint (e.g. outputs/r6/checkpoint-250)",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=float(os.getenv("JETT_LEARNING_RATE", "2e-4")),
+    )
     args = parser.parse_args()
 
     from unsloth import FastLanguageModel
@@ -143,24 +153,32 @@ def main():
         load_in_4bit=load_in_4bit,
     )
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=16,
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
-        lora_alpha=16,
-        lora_dropout=0,
-        bias="none",
-        use_gradient_checkpointing="unsloth",
-        random_state=3407,
-    )
+    if args.lora_adapter:
+        if not os.path.isdir(args.lora_adapter):
+            raise FileNotFoundError(f"LoRA adapter not found: {args.lora_adapter}")
+        from peft import PeftModel
+
+        print(f"[🔗 ADAPTER RESUME] Continuing from {args.lora_adapter}")
+        model = PeftModel.from_pretrained(model, args.lora_adapter, is_trainable=True)
+    else:
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=16,
+            target_modules=[
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ],
+            lora_alpha=16,
+            lora_dropout=0,
+            bias="none",
+            use_gradient_checkpointing="unsloth",
+            random_state=3407,
+        )
 
     data_path = args.data
     if not os.path.isfile(data_path):
@@ -188,14 +206,31 @@ def main():
             gradient_accumulation_steps=args.grad_accum,
             warmup_steps=5,
             max_steps=args.max_steps,
-            learning_rate=2e-4,
+            learning_rate=args.learning_rate,
             fp16=not torch.cuda.is_bf16_supported(),
             bf16=torch.cuda.is_bf16_supported(),
             logging_steps=1,
             output_dir=args.output_dir,
             remove_unused_columns=False,
+            save_strategy="steps",
+            save_steps=args.max_steps,
+            save_total_limit=1,
+            save_only_model=True,
+            push_to_hub=False,
+            report_to=[],
         ),
     )
+    # trl model-card step calls importlib.metadata.version("torch") — breaks when
+    # torch is installed without pip metadata (RunPod cu124 wheel edge case).
+    trainer.create_model_card = lambda *a, **k: None
+
+    # Unsloth/trl SFTConfig pickle mismatch on RunPod — save adapter only.
+    def _save_adapter_only(output_dir, state_dict=None):
+        trainer.model.save_pretrained(output_dir, state_dict=state_dict)
+        if trainer.tokenizer is not None:
+            trainer.tokenizer.save_pretrained(output_dir)
+
+    trainer._save = _save_adapter_only
 
     trainer.train()
 

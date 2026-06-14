@@ -168,6 +168,7 @@ if [[ ! -f "${SERVICE_SOURCE}" ]]; then
 fi
 
 install -Dm755 "${WRAPPER_SOURCE}" "${INSTALL_BIN_DIR}/jett"
+ln -sf "${INSTALL_BIN_DIR}/jett" "${INSTALL_BIN_DIR}/jeTT"
 install -Dm644 "${SERVICE_SOURCE}" "${SERVICE_PATH}"
 
 log "Reloading systemd and enabling jett-daemon service"
@@ -175,4 +176,4 @@ systemctl daemon-reload
 systemctl enable --now jett-daemon.service
 
 log "Install complete"
-log "Run 'jett' for control panel mode, or 'jett --guard|--alert|--query <payload>' for CLI mode"
+log "Run 'jett' or 'jeTT' for the control panel, or 'jett --guard|--alert|--query <payload>' for CLI mode"

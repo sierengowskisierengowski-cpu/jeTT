@@ -49,8 +49,8 @@ export JETT_GGUF_BF16="/tmp/jett-${ROUND}.BF16.gguf"
 export JETT_GGUF_OUT="$GGUF_OUT"
 
 echo "[export] $(date -Is) $CKPT -> $GGUF_OUT"
-if [[ -f "${JETT_GGUF_DIR}/clean/model.safetensors" || -f "${JETT_GGUF_DIR}/clean/pytorch_model.bin" ]]; then
-  bash scripts/export_gguf_from_clean.sh "$ROUND" 2>&1 | tee -a "${LOG%.log}_export.log"
+if [[ -f "${JETT_GGUF_DIR}/clean/model.safetensors" || -f "${JETT_GGUF_DIR}/clean/model-00001-of-00002.safetensors" || -f "${JETT_GGUF_DIR}/clean/pytorch_model.bin" ]]; then
+  bash scripts/runpod_export_gguf_unsloth.sh "$ROUND" 2>&1 | tee -a "${LOG%.log}_export.log"
 else
   bash scripts/export_gguf_pod.sh 2>&1 | tee -a "${LOG%.log}_export.log"
 fi

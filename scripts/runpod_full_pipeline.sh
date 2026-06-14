@@ -64,6 +64,13 @@ if ! venv_ok; then
   exit 1
 fi
 
+pip uninstall -y torchao 2>/dev/null || true
+# --no-deps: force-reinstall with deps bumps torch to cu130 and breaks CUDA on RunPod
+pip install -q --no-deps --force-reinstall "bitsandbytes==0.49.2" 2>/dev/null || true
+pip install -q "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" "torchaudio==2.6.0+cu124" \
+  --index-url https://download.pytorch.org/whl/cu124 2>/dev/null || true
+bash scripts/runpod_preflight.sh 2>&1 | tee -a "$MAIN_LOG"
+
 for spec in "${ROUND_SPECS[@]}"; do
   IFS='|' read -r round data gguf <<<"$spec"
   if [[ -f "$gguf" && "${JETT_FORCE:-0}" != "1" ]]; then
