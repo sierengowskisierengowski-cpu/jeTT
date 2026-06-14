@@ -1,4 +1,5 @@
 target/
+dist/
 .cargo-target/
 outputs/
 backups/
@@ -8,6 +9,8 @@ models/
 intelligence/
 knowledge_base/
 unsloth_compiled_cache/
+.venv/
+venv/
 
 # Generated training blobs (regenerate via scripts/)
 jett_training_data_full.json

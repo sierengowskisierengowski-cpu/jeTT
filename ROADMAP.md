@@ -48,11 +48,11 @@ Legend: `[x]` done · `[ ]` open · `[~]` in progress / ongoing
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 3.1 | GitHub Actions: build `jeTT` + `jett-daemon` (CUDA/NCCL) | [ ] | |
-| 3.2 | Create **GitHub Release** assets (tarball + checksums) | [ ] | `install.sh` needs this |
-| 3.3 | Wire **`install.sh`** to releases (binaries + systemd + default config) | [ ] | Script exists; no releases yet |
-| 3.4 | Model download step (GGUF separate or bundled) + license note | [ ] | Size/legal |
-| 3.5 | Post-install: `jett smoke` + learn mode defaults | [ ] | |
+| 3.1 | GitHub Actions: build `jeTT` + `jett-daemon` (CUDA/NCCL) | [~] | `.github/workflows/ci.yml` — lib tests + CPU bin build; CUDA needs self-hosted / local |
+| 3.2 | Create **GitHub Release** assets (tarball + checksums) | [~] | `release.yml` + `scripts/build_release.sh`; first `v*` tag pending |
+| 3.3 | Wire **`install.sh`** to releases (binaries + systemd + default config) | [x] | Release download + **local build fallback** when no assets |
+| 3.4 | Model download step (GGUF separate or bundled) + license note | [~] | Documented in INSTALL.md — not bundled (size/legal) |
+| 3.5 | Post-install: `jett smoke` + learn mode defaults | [x] | `scripts/post_install_smoke.sh` + `scripts/deploy_walkthrough.sh` |
 
 ---
 
@@ -124,7 +124,7 @@ Vision: jeTT as a **fully offline SOC-on-host** — kernel telemetry → live ri
 
 ## Current focus
 
-**Next item:** **3.1** — GitHub Actions: build `jeTT` + `jett-daemon` (CUDA/NCCL).
+**Next item:** **3.2** — tag first release (`v0.1.0`) and verify `install.sh` download path; CUDA assets via local `build_release.sh` on GPU host.
 
 ---
 

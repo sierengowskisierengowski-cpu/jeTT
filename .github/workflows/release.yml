@@ -1,0 +1,119 @@
+name: jeTT Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+      draft:
+        description: "Create as draft release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: Build release tarballs (CPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential pkg-config
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build CPU release assets
+        run: |
+          JETT_CPU_ONLY=1 bash scripts/build_release.sh
+          ls -la dist/
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jett-release-linux-x86_64-cpu
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/BUILD-NOTES.txt
+          retention-days: 30
+
+  publish-github-release:
+    name: Publish GitHub release
+    needs: build-release
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: jett-release-linux-x86_64-cpu
+          path: dist/
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: jeTT ${{ steps.tag.outputs.name }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          generate_release_notes: true
+          body: |
+            ## Assets
+
+            CPU-only Linux x86_64 tarballs built on GitHub Actions.
+
+            **Production GPU inference** requires a CUDA + NCCL build. GHA runners do not
+            provide NVIDIA CUDA/NCCL. Build locally or on a self-hosted / RunPod GPU host:
+
+            ```bash
+            # Local CUDA release (recommended for production)
+            bash scripts/build_release.sh
+            bash scripts/create_github_release.sh v0.1.0   # optional, needs gh cli
+
+            # Or install from source on the target host
+            sudo bash install.sh   # falls back to local CUDA build if no release assets
+            ```
+
+            Model GGUF is **not** bundled — set `JETT_MODEL` after install. See [INSTALL.md](INSTALL.md)
+            and run `bash scripts/deploy_walkthrough.sh` for a guided deploy.
+          files: |
+            dist/jett-linux-x86_64.tar.gz
+            dist/jett-linux-x86_64.tar.gz.sha256
+            dist/jett-daemon-linux-x86_64.tar.gz
+            dist/jett-daemon-linux-x86_64.tar.gz.sha256
+            dist/BUILD-NOTES.txt

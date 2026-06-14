@@ -9,6 +9,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use jeTT::enforce::{
     enforce_dry_run, should_quarantine_kill, verdict_label_for_reason,
 };
+use jeTT::response::{select_response_tier, ResponseTier};
+use jeTT::tier7_hooks::{process_verdict, VerdictContext};
 use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
 use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
 use jeTT::telemetry::{
@@ -73,6 +75,10 @@ struct JettVerdict {
     elapsed_ms: u64,
     /// Public log/console shows decoy ALLOW; real verdict still enforced.
     honey_decoy: bool,
+    event_str: String,
+    behavior: String,
+    enforce_mode: bool,
+    from_hard_rule: bool,
 }
 
 #[derive(Debug)]
@@ -497,6 +503,17 @@ fn log_verdict(verdict: &JettVerdict) {
         return;
     };
 
+    let tier7 = process_verdict(&VerdictContext {
+        event: verdict.event.clone(),
+        verdict_label: verdict.verdict.clone(),
+        reason: verdict.reason.clone(),
+        event_str: verdict.event_str.clone(),
+        behavior: verdict.behavior.clone(),
+        enforce_mode: verdict.enforce_mode,
+        from_hard_rule: verdict.from_hard_rule,
+    });
+    let explain_suffix = format!(" [{}]", tier7.explanation.summary());
+
     if dropped_logs > 0 {
         let dropped_line = format!(
             "[{}] jeTT log rate limiter dropped {} entries in the previous second\n",
@@ -513,22 +530,24 @@ fn log_verdict(verdict: &JettVerdict) {
             verdict.event.name, verdict.event.exe_path, verdict.event.cmdline
         ));
         format!(
-            "[{}] {} PID:{} → ✅ ALLOW ({}) {}ms\n",
+            "[{}] {} PID:{} → ✅ ALLOW ({}) {}ms{}\n",
             verdict.event.timestamp,
             verdict.event.name,
             verdict.event.pid,
             reason,
             verdict.elapsed_ms,
+            explain_suffix,
         )
     } else {
         format!(
-            "[{}] {} PID:{} → {} ({}) {}ms\n",
+            "[{}] {} PID:{} → {} ({}) {}ms{}\n",
             verdict.event.timestamp,
             verdict.event.name,
             verdict.event.pid,
             verdict.verdict,
             verdict.reason.chars().take(80).collect::<String>(),
             verdict.elapsed_ms,
+            explain_suffix,
         )
     };
 
@@ -630,6 +649,59 @@ fn profile_for_event(event: &ProcessEvent) -> String {
     }
 }
 
+fn behavior_from_event_str(event_str: &str) -> String {
+    event_str
+        .split("behavior:")
+        .nth(1)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn simple_verdict(
+    event: ProcessEvent,
+    verdict: String,
+    reason: String,
+    elapsed_ms: u64,
+    enforce_mode: bool,
+) -> JettVerdict {
+    let event_str = format_event_for_ai(&event);
+    make_verdict(
+        event,
+        verdict,
+        reason,
+        elapsed_ms,
+        false,
+        event_str,
+        String::new(),
+        enforce_mode,
+        false,
+    )
+}
+
+fn make_verdict(
+    event: ProcessEvent,
+    verdict: String,
+    reason: String,
+    elapsed_ms: u64,
+    honey_decoy: bool,
+    event_str: String,
+    behavior: String,
+    enforce_mode: bool,
+    from_hard_rule: bool,
+) -> JettVerdict {
+    JettVerdict {
+        event,
+        verdict,
+        reason,
+        elapsed_ms,
+        honey_decoy,
+        event_str,
+        behavior,
+        enforce_mode,
+        from_hard_rule,
+    }
+}
+
 fn finalize_ai_verdict(
     event: ProcessEvent,
     event_str: &str,
@@ -637,7 +709,9 @@ fn finalize_ai_verdict(
     enforce_mode: bool,
     engine: &Engine,
     started: Instant,
+    from_hard_rule: bool,
 ) -> JettVerdict {
+    let behavior = behavior_from_event_str(event_str);
     let evasion = detect_evasion(event_str);
     let decoy = honeypot_enabled() && evasion.is_adversarial() && should_decoy_allow(&evasion);
 
@@ -646,13 +720,17 @@ fn finalize_ai_verdict(
             "⚠️ [AI VERDICT: REVIEW] inference failed for {} — {}",
             event.name, reason
         );
-        return JettVerdict {
-            verdict: verdict_label_for_reason(&reason, enforce_mode),
-            reason,
-            elapsed_ms: started.elapsed().as_millis() as u64,
+        return make_verdict(
             event,
-            honey_decoy: false,
-        };
+            verdict_label_for_reason(&reason, enforce_mode),
+            reason,
+            started.elapsed().as_millis() as u64,
+            false,
+            event_str.to_string(),
+            behavior.clone(),
+            enforce_mode,
+            from_hard_rule,
+        );
     }
 
     let model_says_quarantine = reason.to_uppercase().contains("QUARANTINE");
@@ -678,15 +756,28 @@ fn finalize_ai_verdict(
             &evasion,
         );
     } else {
+        let chain_severity = None; // tier7_hooks runs at log_verdict; quick tier for enforce path
+        let response_tier = select_response_tier(
+            if from_hard_rule { 1.0 } else { 0.7 },
+            chain_severity,
+            enforce_mode,
+        );
         match verdict_label.as_str() {
-            "🚨 QUARANTINE" => {
-                if should_quarantine_kill(enforce_mode) {
+            "🚨 QUARANTINE" => match response_tier {
+                ResponseTier::KillQuarantine if should_quarantine_kill(enforce_mode) => {
                     println!(
                         "🚨 [AI VERDICT: QUARANTINE] killing PID {} ({})",
                         event.pid, event.name
                     );
                     quarantine_process(&event);
-                } else {
+                }
+                ResponseTier::Contain => {
+                    println!(
+                        "🟠 [AI VERDICT: CONTAIN] PID {} ({}) — isolation placeholder",
+                        event.pid, event.name
+                    );
+                }
+                _ => {
                     println!(
                         "🚨 [AI VERDICT: QUARANTINE] dry-run PID {} ({}) — not killing",
                         event.pid, event.name
@@ -718,13 +809,17 @@ fn finalize_ai_verdict(
         }
     }
 
-    JettVerdict {
-        verdict: verdict_label,
-        reason,
-        elapsed_ms: started.elapsed().as_millis() as u64,
+    make_verdict(
         event,
-        honey_decoy: decoy,
-    }
+        verdict_label,
+        reason,
+        started.elapsed().as_millis() as u64,
+        decoy,
+        event_str.to_string(),
+        behavior,
+        enforce_mode,
+        from_hard_rule,
+    )
 }
 
 fn handle_suspicious_inline(
@@ -744,19 +839,25 @@ fn handle_suspicious_inline(
 
     if let Some(rule) = hard_quarantine_reason(&event_str) {
         let reason = format!("🚨 QUARANTINE | hard rule: {}", rule);
-        let verdict = finalize_ai_verdict(event, &event_str, reason, enforce_mode, engine, t);
+        let verdict = finalize_ai_verdict(
+            event, &event_str, reason, enforce_mode, engine, t, true,
+        );
         log_verdict(&verdict);
         return;
     }
 
     if own_stack_fast_allow(&event_str) {
-        let verdict = JettVerdict {
-            verdict: "✅ ALLOW".to_string(),
-            reason: "own-stack (hard allow)".to_string(),
-            elapsed_ms: t.elapsed().as_millis() as u64,
+        let verdict = make_verdict(
             event,
-            honey_decoy: false,
-        };
+            "✅ ALLOW".to_string(),
+            "own-stack (hard allow)".to_string(),
+            t.elapsed().as_millis() as u64,
+            false,
+            event_str.clone(),
+            behavior_from_event_str(&event_str),
+            enforce_mode,
+            false,
+        );
         log_verdict(&verdict);
         return;
     }
@@ -772,7 +873,9 @@ fn handle_suspicious_inline(
         }
     };
 
-    let verdict = finalize_ai_verdict(event, &event_str, reason, enforce_mode, engine, t);
+    let verdict = finalize_ai_verdict(
+        event, &event_str, reason, enforce_mode, engine, t, false,
+    );
     log_verdict(&verdict);
 }
 
@@ -782,6 +885,7 @@ fn dispatch_telemetry_event(
     coordinator: &mut EventCoordinator,
     stats: &TelemetryStats,
     ai_tx: &crossbeam_channel::Sender<ProcessEvent>,
+    enforce_mode: bool,
 ) {
     if skip_event(&event) {
         return;
@@ -797,13 +901,13 @@ fn dispatch_telemetry_event(
             stats
                 .classify_drop
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let verdict = JettVerdict {
-                verdict: "✅ ALLOW".to_string(),
-                reason: "Trusted GowskiNet process".to_string(),
-                elapsed_ms: t.elapsed().as_millis() as u64,
-                event,
-                honey_decoy: false,
-            };
+                    let verdict = simple_verdict(
+                        event,
+                        "✅ ALLOW".to_string(),
+                        "Trusted GowskiNet process".to_string(),
+                        t.elapsed().as_millis() as u64,
+                        enforce_mode,
+                    );
             if verdict.event.uid == 1000 {
                 log_verdict(&verdict);
             }
@@ -827,13 +931,14 @@ fn dispatch_telemetry_event(
             }
         }
         ProcessDisposition::Unknown => {
-            let verdict = JettVerdict {
-                verdict: "⚠️  REVIEW".to_string(),
-                reason: format!("Unknown process: {}", event.exe_path),
-                elapsed_ms: t.elapsed().as_millis() as u64,
+            let reason = format!("Unknown process: {}", event.exe_path);
+            let verdict = simple_verdict(
                 event,
-                honey_decoy: false,
-            };
+                "⚠️  REVIEW".to_string(),
+                reason,
+                t.elapsed().as_millis() as u64,
+                enforce_mode,
+            );
             log_verdict(&verdict);
         }
     }
@@ -877,8 +982,9 @@ fn run_inference_worker(
         stats
             .ai_verdicts
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let verdict =
-            finalize_ai_verdict(event, &event_str, reason, enforce_mode, &engine, t);
+        let verdict = finalize_ai_verdict(
+            event, &event_str, reason, enforce_mode, &engine, t, false,
+        );
         log_verdict(&verdict);
     }
 }
@@ -956,7 +1062,7 @@ fn run_multisource_daemon(
         }
 
         while let Ok(event) = event_rx.try_recv() {
-            dispatch_telemetry_event(event, &mut coordinator, &stats, &ai_tx);
+            dispatch_telemetry_event(event, &mut coordinator, &stats, &ai_tx, enforce_mode);
         }
 
         loop_count += 1;
@@ -1099,13 +1205,13 @@ fn main() {
 
             match classify_event(&event) {
                 ProcessDisposition::Trusted => {
-                    let verdict = JettVerdict {
-                        verdict: "✅ ALLOW".to_string(),
-                        reason: "Trusted GowskiNet process".to_string(),
-                        elapsed_ms: t.elapsed().as_millis() as u64,
+                    let verdict = simple_verdict(
                         event,
-                        honey_decoy: false,
-                    };
+                        "✅ ALLOW".to_string(),
+                        "Trusted GowskiNet process".to_string(),
+                        t.elapsed().as_millis() as u64,
+                        enforce_mode,
+                    );
                     if verdict.event.uid == 1000 {
                         log_verdict(&verdict);
                     }
@@ -1114,13 +1220,13 @@ fn main() {
                     handle_suspicious_inline(event, enforce_mode, &mut guard_ctx, &engine);
                 }
                 ProcessDisposition::Unknown => {
-                    let verdict = JettVerdict {
-                        verdict: "⚠️  REVIEW".to_string(),
-                        reason: format!("Unknown process: {}", event.exe_path),
-                        elapsed_ms: t.elapsed().as_millis() as u64,
+                    let verdict = simple_verdict(
                         event,
-                        honey_decoy: false,
-                    };
+                        "⚠️  REVIEW".to_string(),
+                        format!("Unknown process: {}", event.exe_path),
+                        t.elapsed().as_millis() as u64,
+                        enforce_mode,
+                    );
                     log_verdict(&verdict);
                 }
             }

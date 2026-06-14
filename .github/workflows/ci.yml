@@ -1,0 +1,86 @@
+name: jeTT CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-lib:
+    name: Rust lib tests (CPU)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential pkg-config
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: cargo test --lib
+        run: cargo test --lib --no-default-features
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --lib --no-default-features -- -D warnings
+
+  build-bins:
+    name: Build jeTT + jett-daemon (CPU)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential pkg-config
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-bins-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binaries (CPU-only)
+        run: |
+          cargo build --release --no-default-features --bin jeTT --bin jett-daemon
+          file target/release/jeTT target/release/jett-daemon
+
+      - name: Shellcheck install scripts
+        run: |
+          sudo apt-get install -y shellcheck
+          shellcheck install.sh scripts/build_release.sh scripts/post_install_smoke.sh

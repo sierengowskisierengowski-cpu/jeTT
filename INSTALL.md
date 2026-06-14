@@ -52,17 +52,52 @@ sudo systemctl enable --now jett-daemon
 
 ```bash
 ./jett status
-./jett smoke                       # learn-mode ART atoms
+bash scripts/post_install_smoke.sh     # status + config checks; JETT_POST_INSTALL_FULL=1 for full ART
+./jett smoke                           # learn-mode ART atoms
 ./scripts/enforce_smoke.sh --enforce-check   # after enforce+dry-run config
 ```
 
-## Release install (when available)
+## Guided deploy walkthrough
+
+Interactive, step-by-step (prints commands; you run sudo/systemctl locally):
+
+```bash
+bash scripts/deploy_walkthrough.sh
+# optional: bash scripts/deploy_walkthrough.sh --model /opt/jett/models/jett-r6-q4_k_m.gguf
+```
+
+Steps: verify build → pin model → allowlist → restart daemon → verify sha256 in journal →
+stop daemon → v6 eval → adversarial eval → restart daemon → optional enforce dry-run preflight.
+
+## Release install
 
 ```bash
 sudo bash install.sh
 ```
 
-Downloads latest GitHub release assets for `jeTT` and `jett-daemon`. Model GGUF is separate — set `JETT_MODEL` after install.
+Downloads latest GitHub release assets for `jeTT` and `jett-daemon` when available.
+If no release exists yet, **falls back to a local `cargo build --release`** (CUDA when `nvcc`
+is present, otherwise CPU-only).
+
+Model GGUF is **not bundled** — set `JETT_MODEL` after install. See license/size notes in
+[TRAINING.md](TRAINING.md).
+
+### Build release tarballs locally
+
+```bash
+# Production CUDA build (RunPod / GPU host)
+bash scripts/build_release.sh
+
+# CPU-only (CI smoke)
+JETT_CPU_ONLY=1 bash scripts/build_release.sh
+
+# Optional: publish with gh cli
+bash scripts/create_github_release.sh v0.1.0
+```
+
+**CI note:** GitHub Actions builds CPU-only assets. Production GPU inference requires a
+CUDA + NCCL build on a self-hosted runner, RunPod pod, or your deploy host (`install.sh`
+local fallback with `nvcc`).
 
 ## Eval (optional)
 

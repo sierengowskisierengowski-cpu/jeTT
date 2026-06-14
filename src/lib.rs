@@ -1,8 +1,21 @@
+pub mod attack_chain;
+pub mod baseline;
+pub mod confidence;
 pub mod enforce;
 pub mod engine;
+pub mod evidence_vault;
+pub mod explain;
+pub mod federation;
 pub mod model_integrity;
 pub mod pipeline;
+pub mod plugin;
+pub mod probe_manager;
+pub mod redteam;
+pub mod response;
+pub mod risk_graph;
+pub mod syscall_fingerprint;
 pub mod telemetry;
+pub mod tier7_hooks;
 
 #[cfg(feature = "ebpf")]
 pub mod ebpf;
