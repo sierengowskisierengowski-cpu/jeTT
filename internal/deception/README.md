@@ -10,7 +10,6 @@ overlay that can lure automated attackers into a controlled observation zone.
 | Script | Purpose |
 |--------|---------|
 | `deploy_maze.sh` | Creates a volatile tmpfs honeypot directory tree. Must be run as root. Set `MAZE_REPO_ROOT` to override the default repo-relative path. |
-| `spawn_mirror.sh` | Spawns additional mirror nodes inside the maze. |
 
 ## shadow_layer/
 

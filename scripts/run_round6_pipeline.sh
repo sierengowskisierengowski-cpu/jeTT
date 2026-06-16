@@ -8,7 +8,7 @@ JETT_BIN="${JETT_BIN:-target/release/jeTT}"
 
 echo "[1/8] Eval r5 model (failures -> reinforce bucket)"
 if [[ -x "$JETT_BIN" ]]; then
-  python3 eval_guard.py --eval tests/guard_eval_v5.jsonl --jett "$JETT_BIN" \
+  python3 training/eval_guard.py --eval tests/guard_eval_v5.jsonl --jett "$JETT_BIN" \
     --failures-out data/eval_failures_r5.jsonl || true
 else
   echo "    skip eval (build jeTT first)"
@@ -33,7 +33,7 @@ python3 generate_c2_variety.py --count 400 --out data/bucket_h_c2_variety.jsonl
 
 echo "[7/8] Stratified merge -> v6"
 TOTAL="${JETT_TRAIN_TOTAL:-60000}"
-python3 stratified_merge.py --total "$TOTAL" --eval-frac 0.05 \
+python3 training/stratified_merge.py --total "$TOTAL" --eval-frac 0.05 \
   --out data/jett_training_v6.json \
   --eval-out tests/guard_eval_v6.jsonl \
   --coverage-out data/mitre_coverage_v6.json \

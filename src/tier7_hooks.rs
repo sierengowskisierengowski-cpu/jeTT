@@ -160,6 +160,7 @@ mod tests {
                 timestamp: 42,
                 source: EventSource::Proc,
                 inode: None,
+                start_time: None,
             },
             verdict_label: verdict.into(),
             reason: reason.into(),

@@ -17,14 +17,16 @@ pub struct ProcessEvent {
     pub source: EventSource,
     /// `(st_dev, st_ino)` from immediate stat when available.
     pub inode: Option<(u64, u64)>,
+    /// `/proc/{pid}/stat` starttime (jiffies) when available.
+    pub start_time: Option<u64>,
 }
 
 pub const JETT_EVT_EXEC: u32 = 1;
 
 impl ProcessEvent {
-    pub fn dedup_key(&self) -> (u32, u32, u64) {
+    pub fn dedup_key(&self) -> (u32, u32, u64, u64) {
         let inode = self.inode.map(|(_, ino)| ino).unwrap_or(0);
-        (self.pid, JETT_EVT_EXEC, inode)
+        (self.pid, JETT_EVT_EXEC, inode, self.start_time.unwrap_or(0))
     }
 
     pub fn source_label(&self) -> &'static str {
@@ -39,6 +41,18 @@ pub fn stat_inode(path: &str) -> Option<(u64, u64)> {
     let meta = std::fs::metadata(path).ok()?;
     use std::os::unix::fs::MetadataExt;
     Some((meta.dev(), meta.ino()))
+}
+
+pub fn proc_start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
+    parse_proc_start_time(&stat)
+}
+
+fn parse_proc_start_time(stat: &str) -> Option<u64> {
+    let after_comm = stat.rsplit_once(") ")?.1;
+    // `/proc/[pid]/stat` field 22 is the process start time; after stripping
+    // the `comm` field, it becomes the 20th whitespace-delimited field here.
+    after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
 pub fn proc_exists(pid: u32) -> bool {
@@ -104,5 +118,11 @@ mod tests {
         let (comm, exe) = parse_guard_event_fields(event);
         assert_eq!(comm, "python3");
         assert_eq!(exe, "/usr/bin/python3.14");
+    }
+
+    #[test]
+    fn parse_proc_start_time_extracts_field_22() {
+        let stat = "12345 (python3) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 424242 0 0 0";
+        assert_eq!(parse_proc_start_time(stat), Some(424242));
     }
 }

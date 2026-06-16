@@ -51,8 +51,6 @@ fn default_exe_prefixes() -> Vec<String> {
         home_join("Projects/GNI/"),
         home_join("Projects/jeTT/"),
         home_join("Projects/bifrost/"),
-        home_join("Projects/meli-fresh/"),
-        home_join("Projects/honeypot/"),
         home_join(".local/share/Steam/"),
         home_join(".cargo/"),
         home_join(".rustup/"),
@@ -442,6 +440,7 @@ mod tests {
             timestamp: 1,
             source: EventSource::Proc,
             inode: None,
+            start_time: None,
         }
     }
 

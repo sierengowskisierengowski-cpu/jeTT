@@ -11,11 +11,14 @@ import subprocess
 import time
 from pathlib import Path
 
+HOME = Path.home()
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 SAMPLES = [
     "python3 PID:4821 uid:1000 exe:/tmp/.hidden cmd:curl evil time:1749000001 behavior:none_observed",
-    "bifrost PID:1204 uid:1000 exe:/home/cosmic/Projects/bifrost/target/release/bifrost cmd:--api time:1749000002 behavior:none_observed",
-    "jett-daemon PID:900 uid:0 exe:/home/cosmic/Projects/jeTT/target/release/jett-daemon cmd: time:1749000003 behavior:none_observed",
+    f"bifrost PID:1204 uid:1000 exe:{HOME}/Projects/bifrost/target/release/bifrost cmd:--api time:1749000002 behavior:none_observed",
+    f"jett-daemon PID:900 uid:0 exe:{REPO_ROOT}/target/release/jett-daemon cmd: time:1749000003 behavior:none_observed",
 ]
 
 

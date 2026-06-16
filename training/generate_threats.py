@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-generate_threats.py — Bucket A generator for jeTT Round 4.
+training/generate_threats.py — Bucket A generator for jeTT Round 4.
 
 Diverse REAL threats with behavioral proof, verdict QUARANTINE. The point is
 *breadth*: Round 3 was ~80% C2, so the model learned "C2 = bad" and little
@@ -12,7 +12,7 @@ Input strings are byte-for-byte what src/bin/daemon.rs emits at runtime (same
 formatter as generate_false_positive_armor.py). Output is one word: QUARANTINE.
 
 RUN:
-    python3 generate_threats.py --count 1500 --out data/bucket_a_threats.jsonl
+    python3 training/generate_threats.py --count 1500 --out data/bucket_a_threats.jsonl
 
 FORMAT NOTE (real daemon constraint): the event string today carries
 name/uid/exe/cmd/time + outbound_connections/sensitive_files/spawned_children
@@ -247,7 +247,7 @@ def main():
         while written < args.count and attempts < max_attempts:
             attempts += 1
             rec = make_record(random.choice(TEMPLATES))
-            h = hashlib.sha1(rec["input"].encode()).hexdigest()
+            h = hashlib.sha256(rec["input"].encode()).hexdigest()
             if h in seen:
                 continue
             seen.add(h)

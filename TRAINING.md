@@ -48,7 +48,7 @@ Produces the final training dataset.
 
 ## Step 7: Train
 
-    python train_core_weights.py
+    python training/train_core_weights.py
 
 Trains IBM Granite 3.3 2B with LoRA adapters via SFTTrainer. Recommended: RunPod A40 GPU, 120-180 steps.
 

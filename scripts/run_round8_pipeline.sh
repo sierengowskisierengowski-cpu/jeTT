@@ -12,7 +12,7 @@ if [[ -f "$FAIL_R6" ]]; then
   python3 generate_eval_reinforce.py --failures "$FAIL_R6" \
     --out data/bucket_j_eval_reinforce_r8.jsonl --variants 4 --round round8
 else
-  echo "[skip] no failures file — run eval_guard.py --failures-out first"
+  echo "[skip] no failures file — run training/eval_guard.py --failures-out first"
 fi
 
 echo "[2/4] Lolbin behavior-over-path top-up"
@@ -20,7 +20,7 @@ python3 generate_lolbins.py --count 150 --out data/bucket_f_lolbins_r8.jsonl
 python3 generate_stretch_threats.py --count 150 --out data/bucket_d3_stretch_r8.jsonl
 
 echo "[3/4] Merge v8"
-python3 stratified_merge.py --total "$TOTAL" --eval-frac 0.05 \
+python3 training/stratified_merge.py --total "$TOTAL" --eval-frac 0.05 \
   --out data/jett_training_v8.json \
   --eval-out tests/guard_eval_v8.jsonl \
   --coverage-out data/mitre_coverage_v8.json \

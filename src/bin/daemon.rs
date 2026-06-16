@@ -19,7 +19,9 @@ use jeTT::telemetry::{
 use jeTT::tier7_hooks::{process_verdict, VerdictContext};
 use std::collections::HashSet;
 use std::fs;
+use std::fs::File;
 use std::io;
+use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::process::Command;
@@ -209,6 +211,12 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
         .collect::<Vec<u8>>();
     let cmdline = String::from_utf8_lossy(&cmdline).trim().to_string();
 
+    let exe_fd =
+        File::open(format!("{}/exe", proc_path)).map_err(|source| ProcReadError::Read {
+            pid,
+            field: "exe",
+            source,
+        })?;
     let exe_path = fs::read_link(format!("{}/exe", proc_path))
         .map_err(|source| ProcReadError::Read {
             pid,
@@ -243,7 +251,11 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
         .parse()
         .map_err(|_| ProcReadError::InvalidUid { pid, raw: uid_raw })?;
 
-    let inode = stat_inode(&exe_path);
+    let inode = exe_fd.metadata().ok().map(|meta| (meta.dev(), meta.ino()));
+    let start_time = crate::telemetry::proc_start_time(pid).ok_or(ProcReadError::MissingField {
+        pid,
+        field: "stat:starttime",
+    })?;
 
     Ok(ProcessEvent {
         pid,
@@ -254,6 +266,7 @@ fn read_proc_info(pid: u32) -> Result<ProcessEvent, ProcReadError> {
         timestamp: get_timestamp(),
         source: EventSource::Proc,
         inode,
+        start_time: Some(start_time),
     })
 }
 
@@ -433,33 +446,18 @@ fn append_log_line(path: &str, line: &str) {
     }
 }
 
-/// Validate that the running process still matches the identity captured at scan time.
-/// Returns `true` only when the PID is still alive and its executable inode matches
-/// the inode recorded in `event.inode`.  If no inode was captured at scan time the
-/// check falls back to comparing the `/proc/{pid}/exe` symlink target; on mismatch
-/// (PID was recycled or the binary was swapped) the function returns `false`.
-fn validate_process_identity(event: &ProcessEvent) -> bool {
-    let proc_exe = format!("/proc/{}/exe", event.pid);
-
-    // Re-resolve the exe symlink; if the process is already gone this fails.
-    let current_exe = match fs::read_link(&proc_exe) {
-        Ok(p) => p.to_string_lossy().to_string(),
-        Err(_) => {
-            eprintln!(
-                "[!] PID {} no longer exists — skipping quarantine to avoid PID-reuse kill",
-                event.pid
-            );
-            return false;
-        }
-    };
-
-    // Strip the " (deleted)" suffix Linux appends when the inode is unlinked.
-    let current_exe_clean = current_exe
+fn process_identity_matches(
+    event: &ProcessEvent,
+    current_exe_path: &str,
+    current_identity: Option<(u64, u64)>,
+    current_start_time: Option<u64>,
+) -> bool {
+    let current_exe_clean = current_exe_path
         .strip_suffix(" (deleted)")
-        .unwrap_or(&current_exe);
+        .unwrap_or(current_exe_path);
+    let expected_exe_clean = event.exe_path.trim_end_matches(" (deleted)");
 
-    // Path-level mismatch → different process.
-    if current_exe_clean != event.exe_path.trim_end_matches(" (deleted)") {
+    if current_exe_clean != expected_exe_clean {
         eprintln!(
             "[!] PID {} exe changed from '{}' to '{}' — possible PID reuse, skipping quarantine",
             event.pid, event.exe_path, current_exe_clean
@@ -467,33 +465,62 @@ fn validate_process_identity(event: &ProcessEvent) -> bool {
         return false;
     }
 
-    // If we have a stable (dev, ino) identity from scan time, verify it.
     if let Some((orig_dev, orig_ino)) = event.inode {
-        match fs::metadata(&proc_exe) {
-            Ok(meta) => {
-                if meta.dev() != orig_dev || meta.ino() != orig_ino {
-                    eprintln!(
-                        "[!] PID {} inode changed (was {}:{}, now {}:{}) — skipping quarantine",
-                        event.pid,
-                        orig_dev,
-                        orig_ino,
-                        meta.dev(),
-                        meta.ino()
-                    );
-                    return false;
-                }
-            }
-            Err(err) => {
-                eprintln!(
-                    "[!] PID {} could not stat /proc/{}/exe: {} — skipping quarantine",
-                    event.pid, event.pid, err
-                );
-                return false;
-            }
+        let Some((current_dev, current_ino)) = current_identity else {
+            eprintln!(
+                "[!] PID {} could not resolve current exe identity — skipping quarantine",
+                event.pid
+            );
+            return false;
+        };
+        if current_dev != orig_dev || current_ino != orig_ino {
+            eprintln!(
+                "[!] PID {} inode changed (was {}:{}, now {}:{}) — skipping quarantine",
+                event.pid, orig_dev, orig_ino, current_dev, current_ino
+            );
+            return false;
+        }
+    }
+
+    if let Some(expected_start) = event.start_time {
+        let Some(current_start) = current_start_time else {
+            eprintln!(
+                "[!] PID {} could not resolve current start time — skipping quarantine",
+                event.pid
+            );
+            return false;
+        };
+        if current_start != expected_start {
+            eprintln!(
+                "[!] PID {} start time changed (was {}, now {}) — skipping quarantine",
+                event.pid, expected_start, current_start
+            );
+            return false;
         }
     }
 
     true
+}
+
+/// Validate that the running process still matches the identity captured at scan time.
+/// The fd for `/proc/{pid}/exe` is opened before kill; if the PID is recycled or the
+/// executable changes, quarantine is aborted.
+fn validate_process_identity(
+    event: &ProcessEvent,
+    proc_exe: &File,
+    current_exe_path: &str,
+) -> bool {
+    let current_identity = proc_exe
+        .metadata()
+        .ok()
+        .map(|meta| (meta.dev(), meta.ino()));
+    let current_start_time = crate::telemetry::proc_start_time(event.pid);
+    process_identity_matches(
+        event,
+        current_exe_path,
+        current_identity,
+        current_start_time,
+    )
 }
 
 fn quarantine_process(event: &ProcessEvent) {
@@ -505,30 +532,34 @@ fn quarantine_process(event: &ProcessEvent) {
         return;
     }
 
-    // ── TOCTOU guard: open /proc/{pid}/exe *before* sending SIGKILL so we copy
-    // from the fd we already hold, not from the (now-stale) filesystem path.
-    // If the process has already exited or been recycled, abort early.
-    if !validate_process_identity(event) {
+    let proc_exe_path = format!("/proc/{}/exe", event.pid);
+    let mut proc_exe = match File::open(&proc_exe_path) {
+        Ok(file) => file,
+        Err(err) => {
+            eprintln!(
+                "[!] Could not open /proc/{}/exe for quarantine: {}",
+                event.pid, err
+            );
+            return;
+        }
+    };
+    let current_exe = match fs::read_link(&proc_exe_path) {
+        Ok(path) => path.to_string_lossy().to_string(),
+        Err(err) => {
+            eprintln!(
+                "[!] PID {} no longer exists or /proc/exe unavailable: {} — skipping quarantine",
+                event.pid, err
+            );
+            return;
+        }
+    };
+    if !validate_process_identity(event, &proc_exe, &current_exe) {
         eprintln!(
             "[!] Identity validation failed for PID {} — quarantine aborted",
             event.pid
         );
         return;
     }
-
-    // Open the executable via /proc/{pid}/exe before killing so we read the
-    // original binary even after the process exits.
-    let proc_exe_path = format!("/proc/{}/exe", event.pid);
-    let exe_contents = match fs::read(&proc_exe_path) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            eprintln!(
-                "[!] Could not read /proc/{}/exe before kill: {} — quarantine aborted",
-                event.pid, err
-            );
-            return;
-        }
-    };
 
     // Now send SIGKILL.
     let pid = event.pid.to_string();
@@ -542,9 +573,11 @@ fn quarantine_process(event: &ProcessEvent) {
                 event.pid,
                 status.code()
             );
+            return;
         }
         Err(error) => {
             eprintln!("[!] Failed to kill PID {}: {}", event.pid, error);
+            return;
         }
     }
 
@@ -566,22 +599,21 @@ fn quarantine_process(event: &ProcessEvent) {
     };
     let destination = Path::new(QUARANTINE_DIR).join(format!("{}-{}", event.pid, file_name));
 
-    // Write the bytes we read pre-kill from /proc/{pid}/exe.
+    let mut exe_contents = Vec::new();
+    if let Err(error) = proc_exe.read_to_end(&mut exe_contents) {
+        eprintln!(
+            "[!] Could not read quarantined binary from /proc/{}/exe: {}",
+            event.pid, error
+        );
+        return;
+    }
+
     match fs::write(&destination, &exe_contents) {
         Ok(_) => {
             println!(
                 "[*] Quarantined binary written to {}",
                 destination.display()
             );
-            // Best-effort removal of the original; failure is non-fatal.
-            if let Err(error) = fs::remove_file(source) {
-                eprintln!(
-                    "[!] Failed to remove quarantined executable {} after copying to {}: {}",
-                    event.exe_path,
-                    destination.display(),
-                    error
-                );
-            }
         }
         Err(error) => {
             eprintln!(
@@ -1343,6 +1375,7 @@ mod tests {
             timestamp: 1,
             source: EventSource::Proc,
             inode: None,
+            start_time: None,
         }
     }
 
@@ -1451,5 +1484,42 @@ mod tests {
             let event = event(name, name, exe);
             assert!(!is_trusted(&event), "{name} {exe} must not be trusted");
         }
+    }
+
+    #[test]
+    fn process_identity_helper_rejects_reuse_and_inode_mismatch() {
+        let mut event = event("ghost", "ghost", "/usr/bin/ghost");
+        event.inode = Some((1, 2));
+
+        assert!(process_identity_matches(
+            &event,
+            "/usr/bin/ghost",
+            Some((1, 2)),
+            Some(1)
+        ));
+        assert!(!process_identity_matches(
+            &event,
+            "/tmp/recycled-ghost",
+            Some((1, 2)),
+            Some(1)
+        ));
+        assert!(!process_identity_matches(
+            &event,
+            "/usr/bin/ghost",
+            Some((9, 9)),
+            Some(1)
+        ));
+        assert!(!process_identity_matches(
+            &event,
+            "/usr/bin/ghost",
+            None,
+            Some(1)
+        ));
+        assert!(!process_identity_matches(
+            &event,
+            "/usr/bin/ghost",
+            Some((1, 2)),
+            Some(2)
+        ));
     }
 }

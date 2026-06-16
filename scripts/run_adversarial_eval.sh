@@ -10,4 +10,4 @@ if systemctl is-active --quiet jett-daemon 2>/dev/null; then
   exit 1
 fi
 
-python3 eval_guard.py --suite adversarial "$@"
+python3 training/eval_guard.py --suite adversarial "$@"

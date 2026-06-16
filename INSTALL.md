@@ -103,7 +103,7 @@ local fallback with `nvcc`).
 
 ```bash
 sudo systemctl stop jett-daemon    # free GPU
-python3 eval_guard.py --eval tests/guard_eval_v6.jsonl
+python3 training/eval_guard.py --eval tests/guard_eval_v6.jsonl
 ./scripts/run_adversarial_eval.sh
 ```
 

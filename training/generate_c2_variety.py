@@ -75,7 +75,7 @@ def main():
                 "output": "QUARANTINE",
                 "reasoning": t["reasoning"],
             }
-            h = hashlib.sha1(rec["input"].encode()).hexdigest()
+            h = hashlib.sha256(rec["input"].encode()).hexdigest()
             if h in seen:
                 continue
             seen.add(h)

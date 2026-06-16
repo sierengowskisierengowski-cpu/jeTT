@@ -120,7 +120,7 @@ The model generalizes; rules **guarantee** known threats and known-good dev path
 
 ## 11. Python for training/eval; Rust for runtime
 
-**Decision:** `jett-daemon` and `jeTT` are Rust. Python scripts train LoRA, generate datasets, and drive `eval_guard.py` (subprocess to Rust binary). Python is **not** in the enforcement hot path.
+**Decision:** `jett-daemon` and `jeTT` are Rust. Python scripts train LoRA, generate datasets, and drive `training/eval_guard.py` (subprocess to Rust binary). Python is **not** in the enforcement hot path.
 
 **Why:** ML tooling ecosystem is Python; EDR latency and safety belong in Rust. Repo may contain large local `.venv/` and `intelligence/` — gitignored, not shipped.
 

@@ -27,7 +27,7 @@ rsync -az --progress -e "$RSYNC_SSH" --no-owner --no-group src/ "$USER@$HOST:$RE
 rsync -az --progress -e "$RSYNC_SSH" --no-owner --no-group coverage/ "$USER@$HOST:$REMOTE/coverage/"
 rsync -az -e "$RSYNC_SSH" --no-owner --no-group tests/guard_eval_v9.jsonl "$USER@$HOST:$REMOTE/tests/"
 rsync -az -e "$RSYNC_SSH" --no-owner --no-group \
-  train_core_weights.py eval_guard.py stratified_merge.py generate_*.py \
+  training/train_core_weights.py training/eval_guard.py training/stratified_merge.py training/generate_*.py \
   "$USER@$HOST:$REMOTE/"
 rsync -az -e "$RSYNC_SSH" --no-owner --no-group data/jett_training_v9.json "$USER@$HOST:$REMOTE/data/"
 

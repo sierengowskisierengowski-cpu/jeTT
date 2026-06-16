@@ -47,7 +47,7 @@ python3 generate_lolbins.py --count 200 --out data/bucket_f_lolbins_r10.jsonl
 python3 generate_stretch_threats.py --count 200 --out data/bucket_d3_stretch_r10.jsonl
 
 echo "[3/6] Merge v10 (explicit buckets — no glob dedup churn)"
-python3 stratified_merge.py --total "$TOTAL" --eval-frac 0.05 \
+python3 training/stratified_merge.py --total "$TOTAL" --eval-frac 0.05 \
   --out data/jett_training_v10.json \
   --eval-out tests/guard_eval_v10.jsonl \
   --coverage-out data/mitre_coverage_v10.json \

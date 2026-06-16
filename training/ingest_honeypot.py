@@ -1,18 +1,20 @@
 import json
 import os
 import glob
+from pathlib import Path
 
 DATASET_FILE = "jett_training_data.json"
+HOME = Path.home()
 
 # UNIFIED REAL DATA LOOKUPS: Targets every real-world log cache found on your laptop
 HONEYPOT_REAL_DATA_PATHS = [
-    "/home/cosmic/Docs/Honeypot/Daily/botnet_*.txt",
-    "/home/cosmic/GowskiNet-Vault/Security/honeypot/honeypot/logs/*-bridge.log",
-    "/home/cosmic/GowskiNet-Vault/Security/honeypot/honeypot/data/dionaea/log/dionaea/dionaea.log",
-    "/home/cosmic/GowskiNet-Vault/Security/honeypot/honeypot/data/conpot/log/conpot.log",
-    "/home/cosmic/Projects/honeypot/logs/*-bridge.log",
-    "/home/cosmic/Projects/honeypot/data/dionaea/log/dionaea/dionaea.log",
-    "/home/cosmic/Projects/honeypot/data/conpot/log/conpot.log"
+    f"{HOME}/Docs/Honeypot/Daily/botnet_*.txt",
+    f"{HOME}/GowskiNet-Vault/Security/honeypot/honeypot/logs/*-bridge.log",
+    f"{HOME}/GowskiNet-Vault/Security/honeypot/honeypot/data/dionaea/log/dionaea/dionaea.log",
+    f"{HOME}/GowskiNet-Vault/Security/honeypot/honeypot/data/conpot/log/conpot.log",
+    f"{HOME}/Projects/honeypot/logs/*-bridge.log",
+    f"{HOME}/Projects/honeypot/data/dionaea/log/dionaea/dionaea.log",
+    f"{HOME}/Projects/honeypot/data/conpot/log/conpot.log"
 ]
 
 def load_dataset():

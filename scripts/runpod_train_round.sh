@@ -32,7 +32,7 @@ if [[ -d "$CKPT" && "${JETT_FORCE:-0}" != "1" ]]; then
   echo "[skip-train] $(date -Is) checkpoint exists: $CKPT (set JETT_FORCE=1 to retrain)"
 else
   echo "[train] $(date -Is) data=$DATA -> $CKPT"
-  python train_core_weights.py \
+  python training/train_core_weights.py \
     --data "$JETT_TRAINING_DATA" \
     --max-steps "$JETT_TRAIN_MAX_STEPS" \
     --batch-size "$JETT_TRAIN_BATCH" \

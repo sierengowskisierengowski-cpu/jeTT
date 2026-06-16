@@ -26,7 +26,7 @@ JETT_BIN="$JETT_BIN" bash scripts/run_eval_models.sh
 echo ""
 echo "[3/4] Score r9 on v9 eval (failures → r10 input)..."
 JETT_MODEL=models/jett-r9-q4_k_m.gguf JETT_BIN="$JETT_BIN" \
-  python3 eval_guard.py --eval tests/guard_eval_v9.jsonl --jett "$JETT_BIN" \
+  python3 training/eval_guard.py --eval tests/guard_eval_v9.jsonl --jett "$JETT_BIN" \
   --failures-out data/eval_failures_r9.jsonl
 
 echo ""

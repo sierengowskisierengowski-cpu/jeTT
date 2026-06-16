@@ -9,7 +9,7 @@ JETT_BIN="${JETT_BIN:-target/release/jeTT}"
 
 echo "[1/6] Optional eval → failures (skip by default; set JETT_RUN_EVAL=1 to score)"
 if [[ "${JETT_RUN_EVAL:-0}" == "1" && -x "$JETT_BIN" && -f "$JETT_MODEL" ]]; then
-  python3 eval_guard.py --eval tests/guard_eval_v6.jsonl --jett "$JETT_BIN" \
+  python3 training/eval_guard.py --eval tests/guard_eval_v6.jsonl --jett "$JETT_BIN" \
     --failures-out data/eval_failures_r6.jsonl || true
 else
   echo "    skip eval (fast path — r5 failures already in data/eval_failures_r5.jsonl)"
@@ -27,11 +27,11 @@ echo "[3/6] Own stack (cowrie, GNI, bifrost, Steam, Govee, jeTT)"
 python3 generate_own_stack.py --count 450 --seed 71 --out data/bucket_g2_own_stack_r7.jsonl
 
 echo "[4/6] Threat depth"
-python3 generate_threats.py --count 500 --out data/bucket_a2_threats_r7.jsonl
+python3 training/generate_threats.py --count 500 --out data/bucket_a2_threats_r7.jsonl
 python3 generate_stretch_threats.py --count 300 --out data/bucket_d2_stretch_r7.jsonl
 
 echo "[5/6] Stratified merge -> v7"
-python3 stratified_merge.py --total "$TOTAL" --eval-frac 0.05 \
+python3 training/stratified_merge.py --total "$TOTAL" --eval-frac 0.05 \
   --out data/jett_training_v7.json \
   --eval-out tests/guard_eval_v7.jsonl \
   --coverage-out data/mitre_coverage_v7.json \

@@ -10,10 +10,8 @@ Environment=JETT_ALLOWLIST=/etc/jett/allowlist.conf
 Environment=JETT_MODEL_PIN=/etc/jett/model.sha256
 Environment=JETT_MODEL=/opt/jett/models/jeTT-q4.gguf
 
-# Try the preferred install path; fall back to the alternate location.
-ExecStartPre=/bin/sh -c 'test -x /usr/local/bin/jett-daemon || test -x /usr/bin/jett-daemon'
 ExecStart=/usr/local/bin/jett-daemon
-ExecStartFallback=/usr/bin/jett-daemon
+ExecStartPre=/usr/bin/test -x /usr/local/bin/jett-daemon
 
 Restart=on-failure
 RestartSec=5
@@ -27,13 +25,13 @@ PrivateTmp=yes
 
 # Mount the whole filesystem read-only; grant write access only where needed.
 ProtectSystem=strict
-ReadWritePaths=/var/jett /var/log/jett
+ReadWritePaths=/var/jett/quarantine /var/log/jett
 
 # Allow read-only access to home directories (model may live under /opt).
 ProtectHome=read-only
 
-# Drop all ambient capabilities — jeTT does not need raw kernel privileges.
-CapabilityBoundingSet=
+# Limit capabilities to process termination and `/proc` inspection.
+CapabilityBoundingSet=CAP_KILL CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
 AmbientCapabilities=
 
 # Prevent setuid/setgid bit abuse.
@@ -41,6 +39,16 @@ RestrictSUIDSGID=yes
 
 # Lock the process personality to the native ABI.
 LockPersonality=yes
+
+# Keep the runtime deterministic and reduce kernel attack surface.
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+UMask=0077
 
 # Prevent mapping memory both writable and executable (thwarts JIT shellcode).
 MemoryDenyWriteExecute=yes

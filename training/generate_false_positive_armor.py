@@ -23,7 +23,7 @@ RUN:
     python3 generate_false_positive_armor.py --count 1200 \
             --out data/bucket_b_scary_legit.jsonl
 
-Then merge via stratified_merge.py (next file). train_core_weights.py drops
+Then merge via training/stratified_merge.py (next file). training/train_core_weights.py drops
 `reasoning` and trains only input -> output for the one-word guard path.
 """
 
@@ -461,7 +461,7 @@ def main():
         while written < args.count and attempts < max_attempts:
             attempts += 1
             rec = make_record(random.choice(TEMPLATES))
-            h = hashlib.sha1(rec["input"].encode()).hexdigest()
+            h = hashlib.sha256(rec["input"].encode()).hexdigest()
             if h in seen:
                 continue
             seen.add(h)

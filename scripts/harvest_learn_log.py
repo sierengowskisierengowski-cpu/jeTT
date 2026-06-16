@@ -11,6 +11,8 @@ import json
 import re
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 LOG_LINE = re.compile(
     r"^\[(?P<ts>[^\]]+)\]\s+(?P<name>\S+)\s+PID:(?P<pid>\d+)\s+→\s+"
     r"(?:🟡\s+)?WOULD-QUARANTINE\s+\((?P<reason>[^)]+)\)"
@@ -63,7 +65,7 @@ def reason_to_behavior(reason: str) -> str:
 def build_input(name: str, pid: str, ts: str, reason: str) -> str:
     exe = f"/usr/bin/{name}" if name in ("bash", "sh", "curl", "wget", "python3", "ssh") else f"/proc/{pid}/exe"
     if name == "moke.sh":
-        exe = "/home/cosmic/Projects/jeTT/scripts/art_jett_smoke.sh"
+        exe = str(REPO_ROOT / "scripts" / "art_jett_smoke.sh")
     behavior = reason_to_behavior(reason)
     return f"{name} PID:{pid} uid:1000 exe:{exe} cmd: time:{ts}{behavior}"
 

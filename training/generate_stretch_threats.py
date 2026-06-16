@@ -6,7 +6,7 @@ Round 5 stretch threats — MITRE gaps from coverage/matrix.yaml:
   T1562.001 impair defenses (disable logging/AV)
   T1190 exploit public-facing application (webshell)
 
-Merged with Bucket A as bucket=threat in stratified_merge.py.
+Merged with Bucket A as bucket=threat in training/stratified_merge.py.
 
 RUN:
     python3 generate_stretch_threats.py --count 600 --out data/bucket_d_stretch.jsonl
@@ -233,7 +233,7 @@ def main():
         while written < args.count and attempts < args.count * 50:
             attempts += 1
             rec = make_record(random.choice(TEMPLATES))
-            h = hashlib.sha1(rec["input"].encode()).hexdigest()
+            h = hashlib.sha256(rec["input"].encode()).hexdigest()
             if h in seen:
                 continue
             seen.add(h)

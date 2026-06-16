@@ -187,6 +187,7 @@ mod tests {
             timestamp: 1,
             source: EventSource::Proc,
             inode: None,
+            start_time: None,
         }
     }
 

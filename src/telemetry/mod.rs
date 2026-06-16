@@ -23,8 +23,8 @@ pub use config::{
 };
 pub use coordinator::EventCoordinator;
 pub use event::{
-    normalize_proc_name, parse_guard_event_fields, proc_name_from_exe, stat_inode, EventSource,
-    ProcessEvent, JETT_EVT_EXEC,
+    normalize_proc_name, parse_guard_event_fields, proc_name_from_exe, proc_start_time, stat_inode,
+    EventSource, ProcessEvent, JETT_EVT_EXEC,
 };
 pub use hard_rules::{hard_quarantine_reason, own_stack_fast_allow, parse_guard_cmdline};
 pub use never_fast_trust::{
