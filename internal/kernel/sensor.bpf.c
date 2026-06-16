@@ -1,3 +1,25 @@
+/*
+ * DEPRECATED — internal/kernel/sensor.bpf.c
+ *
+ * This file is an old prototype sensor.  It is NOT the production sensor.
+ *
+ * !! DO NOT USE IN PRODUCTION !!
+ *
+ * Problems with this file:
+ *   1. It reads the execve filename via a hardcoded raw tracepoint argument
+ *      offset (ctx + 8 bytes).  This offset is architecture-specific and
+ *      fragile — it will silently produce garbage or crash on kernels where
+ *      the tracepoint ABI differs.
+ *   2. It has never been validated against the current kernel BTF type
+ *      information used by the rest of jeTT.
+ *
+ * Use bpf/jett_sensor.bpf.c instead.  That file is the current production
+ * eBPF sensor and is built by scripts/build_bpf.sh.
+ *
+ * This file is kept only to preserve git history.  It will be removed in a
+ * future cleanup commit.
+ */
+
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>

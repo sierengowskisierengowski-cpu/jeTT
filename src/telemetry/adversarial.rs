@@ -181,7 +181,11 @@ pub fn should_decoy_allow(signals: &EvasionSignals) -> bool {
 
 /// Internal-only reason (never printed to jett.log in decoy path).
 pub fn internal_hold_reason(signals: &EvasionSignals) -> String {
-    format!("hold score={} tags={}", signals.score, signals.tags.join(","))
+    format!(
+        "hold score={} tags={}",
+        signals.score,
+        signals.tags.join(",")
+    )
 }
 
 /// Plausible ALLOW explanation matching the process — mirrors real model phrasing.
@@ -234,10 +238,7 @@ pub fn log_deception_audit(event: &str, real_verdict: &str, signals: &EvasionSig
         let _ = f.write_all(line.as_bytes());
     }
     if deception_mode() == DeceptionMode::Loud {
-        eprintln!(
-            "🍯 [HONEYPOT] decoy ALLOW emitted — see {}",
-            AUDIT_LOG
-        );
+        eprintln!("🍯 [HONEYPOT] decoy ALLOW emitted — see {}", AUDIT_LOG);
     }
 }
 
@@ -279,7 +280,10 @@ mod tests {
 
     #[test]
     fn plausible_reason_varies() {
-        assert!(plausible_allow_reason("python3 PID:1 exe:/usr/bin/python3 cmd: time:1").contains("interpreter"));
+        assert!(
+            plausible_allow_reason("python3 PID:1 exe:/usr/bin/python3 cmd: time:1")
+                .contains("interpreter")
+        );
     }
 
     #[test]

@@ -51,7 +51,6 @@ fn default_exe_prefixes() -> Vec<String> {
         home_join("Projects/GNI/"),
         home_join("Projects/jeTT/"),
         home_join("Projects/bifrost/"),
-        home_join("Projects/c2/"),
         home_join("Projects/meli-fresh/"),
         home_join("Projects/honeypot/"),
         home_join(".local/share/Steam/"),
@@ -79,11 +78,44 @@ fn default_trusted_path_prefixes() -> Vec<String> {
 
 fn default_trusted_proc_names() -> Vec<String> {
     vec![
-        "bifrost", "ollama", "docker", "cowrie", "prometheus", "grafana", "loki", "promtail",
-        "portainer", "mosquitto", "cosmic-comp", "cargo", "rclone", "meshtastic", "gni_server",
-        "systemd", "sshd", "pacman", "yay", "jett", "wireguard", "wg", "tmux", "screen", "rustc",
-        "cc1plus", "cc1", "cicc", "nvcc", "ptxas", "fatbinary", "cmake", "make", "ccache",
-        "collect2", "electron", "git", "cursorsandbox",
+        "bifrost",
+        "ollama",
+        "docker",
+        "cowrie",
+        "prometheus",
+        "grafana",
+        "loki",
+        "promtail",
+        "portainer",
+        "mosquitto",
+        "cosmic-comp",
+        "cargo",
+        "rclone",
+        "meshtastic",
+        "gni_server",
+        "systemd",
+        "sshd",
+        "pacman",
+        "yay",
+        "jett",
+        "wireguard",
+        "wg",
+        "tmux",
+        "screen",
+        "rustc",
+        "cc1plus",
+        "cc1",
+        "cicc",
+        "nvcc",
+        "ptxas",
+        "fatbinary",
+        "cmake",
+        "make",
+        "ccache",
+        "collect2",
+        "electron",
+        "git",
+        "cursorsandbox",
     ]
     .into_iter()
     .map(String::from)
@@ -104,9 +136,29 @@ fn default_toolchain_exe_markers() -> Vec<String> {
 
 fn default_toolchain_bin_names() -> Vec<String> {
     vec![
-        "as", "ld", "gcc", "g++", "c++", "cc1", "cc1plus", "collect2", "cicc", "nvcc", "ptxas",
-        "fatbinary", "rustc", "cargo", "cmake", "make", "ccache", "git", "electron", "cursorsandbox",
-        "ld.lld", "clang", "clang++",
+        "as",
+        "ld",
+        "gcc",
+        "g++",
+        "c++",
+        "cc1",
+        "cc1plus",
+        "collect2",
+        "cicc",
+        "nvcc",
+        "ptxas",
+        "fatbinary",
+        "rustc",
+        "cargo",
+        "cmake",
+        "make",
+        "ccache",
+        "git",
+        "electron",
+        "cursorsandbox",
+        "ld.lld",
+        "clang",
+        "clang++",
     ]
     .into_iter()
     .map(String::from)
@@ -191,7 +243,12 @@ fn parsed_config() -> Option<&'static ParsedConfig> {
         .as_ref()
 }
 
-fn pick(section: Option<&ParsedConfig>, has: bool, from: impl Fn(&ParsedConfig) -> Vec<String>, default: fn() -> Vec<String>) -> Vec<String> {
+fn pick(
+    section: Option<&ParsedConfig>,
+    has: bool,
+    from: impl Fn(&ParsedConfig) -> Vec<String>,
+    default: fn() -> Vec<String>,
+) -> Vec<String> {
     if let Some(cfg) = section {
         if has {
             return from(cfg);
@@ -239,7 +296,9 @@ fn load_trusted_procs() -> Vec<String> {
 fn load_toolchain_markers() -> Vec<String> {
     pick(
         parsed_config(),
-        parsed_config().map(|c| c.has_toolchain_marker).unwrap_or(false),
+        parsed_config()
+            .map(|c| c.has_toolchain_marker)
+            .unwrap_or(false),
         |c| c.toolchain_marker.clone(),
         default_toolchain_exe_markers,
     )
@@ -248,7 +307,9 @@ fn load_toolchain_markers() -> Vec<String> {
 fn load_toolchain_bins() -> Vec<String> {
     pick(
         parsed_config(),
-        parsed_config().map(|c| c.has_toolchain_bin).unwrap_or(false),
+        parsed_config()
+            .map(|c| c.has_toolchain_bin)
+            .unwrap_or(false),
         |c| c.toolchain_bin.clone(),
         default_toolchain_bin_names,
     )
@@ -335,13 +396,31 @@ pub fn daemon_is_trusted(event: &ProcessEvent) -> bool {
     if daemon_is_toolchain_build(event) {
         return true;
     }
-    for trusted in daemon_trusted_proc_names() {
-        if event.name.contains(trusted) || event.cmdline.contains(trusted) {
-            return true;
+    // Trusted process name: match only the exact executable basename, never
+    // substring-match against cmdline arguments (that would let `./malware
+    // --disguise jett.conf` impersonate a trusted process).
+    // Also guard against attacker-writable locations: a binary named `git`
+    // in /tmp/ should not be trusted just because of its name.
+    let exe_basename = normalize_proc_name(
+        Path::new(&event.exe_path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&event.name),
+    );
+    let in_attacker_writable_path = event.exe_path.starts_with("/tmp")
+        || event.exe_path.starts_with("/dev/shm")
+        || event.exe_path.starts_with("/var/tmp");
+    if !in_attacker_writable_path {
+        for trusted in daemon_trusted_proc_names() {
+            if exe_basename == trusted.as_str() {
+                return true;
+            }
         }
     }
+    // Trusted path prefix: match only the exe_path, not cmdline arguments.
+    // Matching cmdline would allow `./malware --config /usr/bin/foo` to bypass.
     for path in daemon_trusted_path_prefixes() {
-        if event.exe_path.starts_with(path) || event.cmdline.contains(path) {
+        if event.exe_path.starts_with(path.as_str()) {
             return true;
         }
     }
@@ -401,6 +480,53 @@ mod tests {
 
     #[test]
     fn curl_not_trusted() {
-        assert!(!daemon_is_trusted(&pe("curl", "curl evil", "/usr/bin/curl")));
+        assert!(!daemon_is_trusted(&pe(
+            "curl",
+            "curl evil",
+            "/usr/bin/curl"
+        )));
+    }
+
+    // ── Security regression tests: cmdline argument smuggling ──────────────
+
+    /// `./malware --config /usr/bin/foo` must NOT be trusted because the
+    /// trusted path `/usr/bin/` appears only in cmdline args, not in exe_path.
+    #[test]
+    fn malware_with_trusted_path_in_args_not_trusted() {
+        assert!(!daemon_is_trusted(&pe(
+            "malware",
+            "./malware --config /usr/bin/foo",
+            "/tmp/malware"
+        )));
+    }
+
+    /// `./malware --disguise jett.conf` must NOT be trusted because `jett`
+    /// appears only in a cmdline argument, not as the executable basename.
+    #[test]
+    fn malware_with_trusted_proc_name_in_args_not_trusted() {
+        assert!(!daemon_is_trusted(&pe(
+            "malware",
+            "./malware --disguise jett.conf",
+            "/tmp/malware"
+        )));
+    }
+
+    /// A process whose exe_path contains a trusted path as a *prefix* should
+    /// be trusted, not merely because an argument references that path.
+    #[test]
+    fn exe_under_trusted_path_is_trusted() {
+        assert!(daemon_is_trusted(&pe(
+            "myprog",
+            "myprog arg",
+            "/usr/bin/myprog"
+        )));
+    }
+
+    /// Exact basename match: a binary literally named `git` in `/usr/bin/` is
+    /// trusted, but one with a misleading name is not.
+    #[test]
+    fn fake_git_name_not_trusted() {
+        // name claims "git" but exe_path is in /tmp/ — not trusted
+        assert!(!daemon_is_trusted(&pe("git", "git status", "/tmp/git")));
     }
 }

@@ -1,30 +1,31 @@
+#[cfg(feature = "ebpf")]
+use jeTT::ebpf::spawn_ebpf_sensor;
+use jeTT::enforce::{enforce_dry_run, should_quarantine_kill, verdict_label_for_reason};
+use jeTT::engine::{
+    alert as engine_alert, guard as engine_guard, load_model, new_guard_context, Engine,
+};
+use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
+use jeTT::response::{select_response_tier, ResponseTier};
+#[cfg(feature = "ebpf")]
+use jeTT::telemetry::{
+    ai_queue_size, dedup_window_ms, stat_log_interval_sec, EventCoordinator, TelemetryStats,
+};
+use jeTT::telemetry::{
+    daemon_is_trusted, detect_evasion, hard_quarantine_reason, honeypot_enabled,
+    log_deception_audit, max_event_len, normalize_proc_name, own_stack_fast_allow,
+    parse_telemetry_mode, plausible_allow_reason, should_decoy_allow, stat_inode,
+    telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
+};
+use jeTT::tier7_hooks::{process_verdict, VerdictContext};
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use jeTT::enforce::{
-    enforce_dry_run, should_quarantine_kill, verdict_label_for_reason,
-};
-use jeTT::response::{select_response_tier, ResponseTier};
-use jeTT::tier7_hooks::{process_verdict, VerdictContext};
-use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
-use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
-use jeTT::telemetry::{
-    detect_evasion, daemon_is_trusted, hard_quarantine_reason, honeypot_enabled,
-    log_deception_audit, max_event_len, normalize_proc_name, own_stack_fast_allow,
-    parse_telemetry_mode, plausible_allow_reason, should_decoy_allow, stat_inode,
-    telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
-};
-#[cfg(feature = "ebpf")]
-use jeTT::telemetry::{
-    ai_queue_size, dedup_window_ms, stat_log_interval_sec, EventCoordinator, TelemetryStats,
-};
-#[cfg(feature = "ebpf")]
-use jeTT::ebpf::spawn_ebpf_sensor;
 
 // ─────────────────────────────────────────────
 // jeTT Daemon — Real System Event Monitor
@@ -262,7 +263,7 @@ fn classify_event(event: &ProcessEvent) -> ProcessDisposition {
     } else if is_trusted(event) {
         ProcessDisposition::Trusted
     } else {
-                // Unknown binaries (neither trusted nor matching suspicious patterns)
+        // Unknown binaries (neither trusted nor matching suspicious patterns)
         // now escalate to the AI model rather than running unjudged.
         // The hash-allowlist + trusted-path checks in guard() short-circuit
         // the common cases, so only genuinely-unknown binaries hit inference.
@@ -432,6 +433,69 @@ fn append_log_line(path: &str, line: &str) {
     }
 }
 
+/// Validate that the running process still matches the identity captured at scan time.
+/// Returns `true` only when the PID is still alive and its executable inode matches
+/// the inode recorded in `event.inode`.  If no inode was captured at scan time the
+/// check falls back to comparing the `/proc/{pid}/exe` symlink target; on mismatch
+/// (PID was recycled or the binary was swapped) the function returns `false`.
+fn validate_process_identity(event: &ProcessEvent) -> bool {
+    let proc_exe = format!("/proc/{}/exe", event.pid);
+
+    // Re-resolve the exe symlink; if the process is already gone this fails.
+    let current_exe = match fs::read_link(&proc_exe) {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(_) => {
+            eprintln!(
+                "[!] PID {} no longer exists — skipping quarantine to avoid PID-reuse kill",
+                event.pid
+            );
+            return false;
+        }
+    };
+
+    // Strip the " (deleted)" suffix Linux appends when the inode is unlinked.
+    let current_exe_clean = current_exe
+        .strip_suffix(" (deleted)")
+        .unwrap_or(&current_exe);
+
+    // Path-level mismatch → different process.
+    if current_exe_clean != event.exe_path.trim_end_matches(" (deleted)") {
+        eprintln!(
+            "[!] PID {} exe changed from '{}' to '{}' — possible PID reuse, skipping quarantine",
+            event.pid, event.exe_path, current_exe_clean
+        );
+        return false;
+    }
+
+    // If we have a stable (dev, ino) identity from scan time, verify it.
+    if let Some((orig_dev, orig_ino)) = event.inode {
+        match fs::metadata(&proc_exe) {
+            Ok(meta) => {
+                if meta.dev() != orig_dev || meta.ino() != orig_ino {
+                    eprintln!(
+                        "[!] PID {} inode changed (was {}:{}, now {}:{}) — skipping quarantine",
+                        event.pid,
+                        orig_dev,
+                        orig_ino,
+                        meta.dev(),
+                        meta.ino()
+                    );
+                    return false;
+                }
+            }
+            Err(err) => {
+                eprintln!(
+                    "[!] PID {} could not stat /proc/{}/exe: {} — skipping quarantine",
+                    event.pid, event.pid, err
+                );
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 fn quarantine_process(event: &ProcessEvent) {
     if enforce_dry_run() {
         println!(
@@ -441,6 +505,32 @@ fn quarantine_process(event: &ProcessEvent) {
         return;
     }
 
+    // ── TOCTOU guard: open /proc/{pid}/exe *before* sending SIGKILL so we copy
+    // from the fd we already hold, not from the (now-stale) filesystem path.
+    // If the process has already exited or been recycled, abort early.
+    if !validate_process_identity(event) {
+        eprintln!(
+            "[!] Identity validation failed for PID {} — quarantine aborted",
+            event.pid
+        );
+        return;
+    }
+
+    // Open the executable via /proc/{pid}/exe before killing so we read the
+    // original binary even after the process exits.
+    let proc_exe_path = format!("/proc/{}/exe", event.pid);
+    let exe_contents = match fs::read(&proc_exe_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!(
+                "[!] Could not read /proc/{}/exe before kill: {} — quarantine aborted",
+                event.pid, err
+            );
+            return;
+        }
+    };
+
+    // Now send SIGKILL.
     let pid = event.pid.to_string();
     match Command::new("kill").args(["-9", &pid]).status() {
         Ok(status) if status.success() => {
@@ -476,8 +566,14 @@ fn quarantine_process(event: &ProcessEvent) {
     };
     let destination = Path::new(QUARANTINE_DIR).join(format!("{}-{}", event.pid, file_name));
 
-    match fs::copy(source, &destination) {
+    // Write the bytes we read pre-kill from /proc/{pid}/exe.
+    match fs::write(&destination, &exe_contents) {
         Ok(_) => {
+            println!(
+                "[*] Quarantined binary written to {}",
+                destination.display()
+            );
+            // Best-effort removal of the original; failure is non-fatal.
             if let Err(error) = fs::remove_file(source) {
                 eprintln!(
                     "[!] Failed to remove quarantined executable {} after copying to {}: {}",
@@ -489,8 +585,7 @@ fn quarantine_process(event: &ProcessEvent) {
         }
         Err(error) => {
             eprintln!(
-                "[!] Failed to copy {} to {}: {}",
-                event.exe_path,
+                "[!] Failed to write quarantine file {}: {}",
                 destination.display(),
                 error
             );
@@ -607,9 +702,7 @@ fn scan_new_processes(seen_pids: &Arc<Mutex<HashSet<u32>>>) -> Vec<ProcessEvent>
             // or root-owned (PermissionDenied). Neither is actionable noise.
             Err(ProcReadError::Read { source, .. })
                 if source.kind() == io::ErrorKind::NotFound
-                    || source.kind() == io::ErrorKind::PermissionDenied =>
-            {
-            }
+                    || source.kind() == io::ErrorKind::PermissionDenied => {}
             Err(error) => eprintln!("[!] {}", error),
         }
     }
@@ -783,7 +876,7 @@ fn finalize_ai_verdict(
                         event.pid, event.name
                     );
                 }
-            }
+            },
             "🟡 WOULD-QUARANTINE" => {
                 println!(
                     "🟡 [LEARN MODE] WOULD quarantine PID {} ({}) — not killing",
@@ -839,9 +932,7 @@ fn handle_suspicious_inline(
 
     if let Some(rule) = hard_quarantine_reason(&event_str) {
         let reason = format!("🚨 QUARANTINE | hard rule: {}", rule);
-        let verdict = finalize_ai_verdict(
-            event, &event_str, reason, enforce_mode, engine, t, true,
-        );
+        let verdict = finalize_ai_verdict(event, &event_str, reason, enforce_mode, engine, t, true);
         log_verdict(&verdict);
         return;
     }
@@ -873,9 +964,7 @@ fn handle_suspicious_inline(
         }
     };
 
-    let verdict = finalize_ai_verdict(
-        event, &event_str, reason, enforce_mode, engine, t, false,
-    );
+    let verdict = finalize_ai_verdict(event, &event_str, reason, enforce_mode, engine, t, false);
     log_verdict(&verdict);
 }
 
@@ -891,7 +980,9 @@ fn dispatch_telemetry_event(
         return;
     }
     if !coordinator.accept(&event) {
-        stats.dedup.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        stats
+            .dedup
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return;
     }
 
@@ -901,35 +992,33 @@ fn dispatch_telemetry_event(
             stats
                 .classify_drop
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let verdict = simple_verdict(
-                        event,
-                        "✅ ALLOW".to_string(),
-                        "Trusted GowskiNet process".to_string(),
-                        t.elapsed().as_millis() as u64,
-                        enforce_mode,
-                    );
+            let verdict = simple_verdict(
+                event,
+                "✅ ALLOW".to_string(),
+                "Trusted GowskiNet process".to_string(),
+                t.elapsed().as_millis() as u64,
+                enforce_mode,
+            );
             if verdict.event.uid == 1000 {
                 log_verdict(&verdict);
             }
         }
-        ProcessDisposition::Suspicious => {
-            match ai_tx.try_send(event) {
-                Ok(()) => {
-                    stats
-                        .ai_queued
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                Err(crossbeam_channel::TrySendError::Full(_)) => {
-                    stats
-                        .ai_dropped
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    eprintln!("[!] AI queue full — dropped suspicious event");
-                }
-                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                    eprintln!("[!] AI queue disconnected");
-                }
+        ProcessDisposition::Suspicious => match ai_tx.try_send(event) {
+            Ok(()) => {
+                stats
+                    .ai_queued
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
-        }
+            Err(crossbeam_channel::TrySendError::Full(_)) => {
+                stats
+                    .ai_dropped
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                eprintln!("[!] AI queue full — dropped suspicious event");
+            }
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                eprintln!("[!] AI queue disconnected");
+            }
+        },
         ProcessDisposition::Unknown => {
             let reason = format!("Unknown process: {}", event.exe_path);
             let verdict = simple_verdict(
@@ -982,9 +1071,8 @@ fn run_inference_worker(
         stats
             .ai_verdicts
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let verdict = finalize_ai_verdict(
-            event, &event_str, reason, enforce_mode, &engine, t, false,
-        );
+        let verdict =
+            finalize_ai_verdict(event, &event_str, reason, enforce_mode, &engine, t, false);
         log_verdict(&verdict);
     }
 }
@@ -1122,8 +1210,7 @@ fn main() {
     let behavior_mode = behavior_mode_label();
     let telemetry = parse_telemetry_mode();
     #[cfg(feature = "ebpf")]
-    let use_pipeline =
-        matches!(telemetry, TelemetryMode::Ebpf | TelemetryMode::Both);
+    let use_pipeline = matches!(telemetry, TelemetryMode::Ebpf | TelemetryMode::Both);
     #[cfg(not(feature = "ebpf"))]
     {
         if matches!(telemetry, TelemetryMode::Ebpf | TelemetryMode::Both) {

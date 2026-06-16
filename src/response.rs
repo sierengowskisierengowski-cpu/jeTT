@@ -89,10 +89,7 @@ mod tests {
 
     #[test]
     fn low_confidence_logs_only() {
-        assert_eq!(
-            select_response_tier(0.5, None, true),
-            ResponseTier::Log
-        );
+        assert_eq!(select_response_tier(0.5, None, true), ResponseTier::Log);
     }
 
     fn restore(key: &str, prev: Option<&str>) {

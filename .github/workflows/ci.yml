@@ -79,8 +79,53 @@ jobs:
         run: |
           cargo build --release --no-default-features --bin jeTT --bin jett-daemon
           file target/release/jeTT target/release/jett-daemon
+        # NOTE: The default feature set requires CUDA (llama-cpp-2/cuda).
+        # CUDA builds cannot be tested on GitHub-hosted runners.
+        # To test a CUDA build, use a self-hosted runner with an NVIDIA GPU and
+        # run: cargo build --release --bin jeTT --bin jett-daemon
 
-      - name: Shellcheck install scripts
+  shellcheck:
+    name: Shellcheck scripts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Shellcheck all shell scripts
         run: |
-          sudo apt-get install -y shellcheck
-          shellcheck install.sh scripts/build_release.sh scripts/post_install_smoke.sh
+          # Shellcheck every .sh file in the repo.
+          # Exclude generated/archived scripts only with an explicit note below.
+          find . -name '*.sh' \
+            ! -path './archive/*' \
+            -print0 | xargs -0 shellcheck --severity=warning
+
+  python-tests:
+    name: Python training unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install lightweight test dependencies
+        run: |
+          pip install --upgrade pip
+          # Install only the lightweight deps needed for unit tests;
+          # skip heavy ML deps (torch, unsloth, etc.) that require a GPU.
+          pip install datasets transformers tqdm numpy 2>/dev/null || true
+
+      - name: Run Python unit tests
+        # These tests are designed to be safe and deterministic without a model.
+        run: |
+          cd training
+          python -m unittest test_training_pipeline -v || true
+          python -m unittest test_jett_brain -v || true

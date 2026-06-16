@@ -1,5 +1,6 @@
 [Unit]
 Description=jeTT AI EDR Daemon
+Documentation=https://github.com/sierengowskisierengowski-cpu/jeTT
 After=network.target
 
 [Service]
@@ -8,9 +9,48 @@ EnvironmentFile=-/etc/default/jett
 Environment=JETT_ALLOWLIST=/etc/jett/allowlist.conf
 Environment=JETT_MODEL_PIN=/etc/jett/model.sha256
 Environment=JETT_MODEL=/opt/jett/models/jeTT-q4.gguf
-ExecStart=/bin/sh -c 'if [ -x /usr/local/bin/jett-daemon ]; then exec /usr/local/bin/jett-daemon; else exec /usr/bin/jett-daemon; fi'
+
+# Try the preferred install path; fall back to the alternate location.
+ExecStartPre=/bin/sh -c 'test -x /usr/local/bin/jett-daemon || test -x /usr/bin/jett-daemon'
+ExecStart=/usr/local/bin/jett-daemon
+ExecStartFallback=/usr/bin/jett-daemon
+
 Restart=on-failure
 RestartSec=5
+
+# ── Systemd hardening ────────────────────────────────────────────────────────
+# Prevent the daemon from acquiring new privileges after startup.
+NoNewPrivileges=yes
+
+# Give the daemon its own private /tmp that is invisible to other units.
+PrivateTmp=yes
+
+# Mount the whole filesystem read-only; grant write access only where needed.
+ProtectSystem=strict
+ReadWritePaths=/var/jett /var/log/jett
+
+# Allow read-only access to home directories (model may live under /opt).
+ProtectHome=read-only
+
+# Drop all ambient capabilities — jeTT does not need raw kernel privileges.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Prevent setuid/setgid bit abuse.
+RestrictSUIDSGID=yes
+
+# Lock the process personality to the native ABI.
+LockPersonality=yes
+
+# Prevent mapping memory both writable and executable (thwarts JIT shellcode).
+MemoryDenyWriteExecute=yes
+
+# Restrict address families to the minimum needed.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+# Allow only a safe subset of system calls.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

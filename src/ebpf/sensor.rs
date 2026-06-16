@@ -102,9 +102,7 @@ fn run_sensor_loop(
     let open = ObjectBuilder::default()
         .open_file(bpf_path)
         .map_err(|e| format!("open BPF object: {}", e))?;
-    let mut obj = open
-        .load()
-        .map_err(|e| format!("load BPF object: {}", e))?;
+    let mut obj = open.load().map_err(|e| format!("load BPF object: {}", e))?;
 
     let mut attached = false;
     let mut _link = None;
@@ -145,9 +143,7 @@ fn run_sensor_loop(
     })
     .map_err(|e| format!("ringbuf add: {}", e))?;
 
-    let ringbuf = rb
-        .build()
-        .map_err(|e| format!("ringbuf build: {}", e))?;
+    let ringbuf = rb.build().map_err(|e| format!("ringbuf build: {}", e))?;
 
     eprintln!("[+] eBPF sensor attached (sched_process_exec → ringbuf)");
     loop {

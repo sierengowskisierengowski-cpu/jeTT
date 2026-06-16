@@ -6,10 +6,9 @@ use super::event::{normalize_proc_name, parse_guard_event_fields};
 
 /// Shells, interpreters, downloaders, and privesc tools — shared by daemon + guard().
 pub const NEVER_FAST_TRUST: &[&str] = &[
-    "bash", "sh", "zsh", "dash", "fish", "ksh", "tcsh",
-    "python", "python3", "perl", "ruby", "node", "php", "lua",
-    "nc", "ncat", "netcat", "socat", "telnet", "ssh", "awk", "xterm",
-    "curl", "wget", "base64", "pkexec",
+    "bash", "sh", "zsh", "dash", "fish", "ksh", "tcsh", "python", "python3", "perl", "ruby",
+    "node", "php", "lua", "nc", "ncat", "netcat", "socat", "telnet", "ssh", "awk", "xterm", "curl",
+    "wget", "base64", "pkexec",
 ];
 
 /// Match exe/comm names including versioned distros (`python3.13`, `node22`).
@@ -50,7 +49,14 @@ mod tests {
 
     #[test]
     fn versioned_interpreters_match() {
-        for name in ["python3.14", "python3.13", "python3.12", "node22", "node20", "ruby3.3"] {
+        for name in [
+            "python3.14",
+            "python3.13",
+            "python3.12",
+            "node22",
+            "node20",
+            "ruby3.3",
+        ] {
             assert!(
                 matches_never_fast_trust(name),
                 "{name} should never fast-trust"
@@ -61,10 +67,7 @@ mod tests {
     #[test]
     fn unrelated_binaries_do_not_match() {
         for name in ["git-remote-https", "moke.sh", "rg", "docker", "rustc"] {
-            assert!(
-                !matches_never_fast_trust(name),
-                "{name} should not match"
-            );
+            assert!(!matches_never_fast_trust(name), "{name} should not match");
         }
     }
 

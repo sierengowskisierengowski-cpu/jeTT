@@ -91,12 +91,7 @@ mod tests {
 
     #[test]
     fn hard_rule_explanation() {
-        let exp = explain_verdict(
-            "🚨 QUARANTINE | hard rule: curl_pipe_sh",
-            None,
-            1.0,
-            vec![],
-        );
+        let exp = explain_verdict("🚨 QUARANTINE | hard rule: curl_pipe_sh", None, 1.0, vec![]);
         assert_eq!(exp.rule_id.as_deref(), Some("curl_pipe_sh"));
         assert!((exp.confidence - 1.0).abs() < f32::EPSILON);
     }

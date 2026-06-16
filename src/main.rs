@@ -20,9 +20,9 @@ fn print_banner_line(content: &str) {
     println!("║ {:<35} ║", rendered);
 }
 
-
-use jeTT::engine::{guard, alert, query, trust_binary, untrust_binary, list_trusted, load_model, new_guard_context};
-
+use jeTT::engine::{
+    alert, guard, list_trusted, load_model, new_guard_context, query, trust_binary, untrust_binary,
+};
 
 enum RunMode {
     Demo,

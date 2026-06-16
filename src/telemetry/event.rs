@@ -57,12 +57,7 @@ pub fn normalize_proc_name(name: &str) -> String {
 
 /// Parse `{comm} PID:… uid:… exe:{path} cmd:…` strings passed to `jeTT --guard`.
 pub fn parse_guard_event_fields(event: &str) -> (String, String) {
-    let comm = event
-        .split(" PID:")
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let comm = event.split(" PID:").next().unwrap_or("").trim().to_string();
 
     let exe_path = event
         .split_once(" exe:")
