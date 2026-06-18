@@ -193,10 +193,7 @@ pub fn snapshot_behavior(pid: u32) -> (String, bool) {
         return (" behavior:exited_before_snapshot".to_string(), true);
     }
     let (conns, files, kids) = snapshot_once(pid);
-    (
-        behavior_profile_from(conns, files, kids),
-        false,
-    )
+    (behavior_profile_from(conns, files, kids), false)
 }
 
 fn behavior_mode_snapshot() -> bool {

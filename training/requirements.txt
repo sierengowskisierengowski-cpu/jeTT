@@ -1,0 +1,29 @@
+# jeTT Training Dependencies
+#
+# Core (lightweight — required for dataset generation and unit tests):
+# Install with: pip install -r requirements.txt
+
+# Serialisation / data handling
+datasets>=2.14
+jsonlines>=3.1
+
+# Tokenisation (CPU-only, no GPU needed for dataset scripts)
+transformers>=4.38
+
+# Evaluation utilities
+evaluate>=0.4
+tqdm>=4.66
+numpy>=1.26
+
+# ── Optional: Fine-tuning (GPU required) ─────────────────────────────────────
+# Install with: pip install -r requirements.txt ".[train]"
+# Uncomment the lines below to enable training mode.
+#
+# unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git
+# torch>=2.1
+# bitsandbytes>=0.43
+# peft>=0.10
+# trl>=0.8
+# accelerate>=0.27
+# sentencepiece
+# protobuf

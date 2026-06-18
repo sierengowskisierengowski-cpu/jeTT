@@ -2,7 +2,7 @@
 # Weekly learn-mode false-positive harvest → candidate v7 eval rows.
 #
 # Run manually or via cron (Sundays 03:00 example):
-#   0 3 * * 0 /home/cosmic/Projects/jeTT/scripts/weekly_harvest.sh >> /var/log/jett/harvest.log 2>&1
+#   0 3 * * 0 /path/to/jeTT/scripts/weekly_harvest.sh >> /var/log/jett/harvest.log 2>&1
 #
 # Requires: jett-daemon in learn mode, log at /var/log/jett/jett.log
 set -euo pipefail

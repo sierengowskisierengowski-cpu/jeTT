@@ -34,7 +34,7 @@ def main() -> int:
 
     cov_path = Path(args.coverage)
     if not cov_path.exists():
-        print(f"[!] missing {cov_path} — run stratified_merge.py first")
+        print(f"[!] missing {cov_path} — run training/stratified_merge.py first")
         return 1
 
     coverage: dict[str, int] = json.loads(cov_path.read_text())

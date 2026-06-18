@@ -55,6 +55,7 @@ fn jett_event_to_process(ev: &JettEvent) -> ProcessEvent {
     let comm = cstr_field(&ev.comm);
     let path = cstr_field(&ev.path);
     let inode = stat_inode(&path);
+    let start_time = crate::telemetry::proc_start_time(ev.pid);
     ProcessEvent {
         pid: ev.pid,
         name: proc_name_from_exe(&path, &comm),
@@ -64,6 +65,7 @@ fn jett_event_to_process(ev: &JettEvent) -> ProcessEvent {
         timestamp: kernel_ts_secs(ev.ts_ns),
         source: EventSource::Ebpf,
         inode,
+        start_time,
     }
 }
 
@@ -102,9 +104,7 @@ fn run_sensor_loop(
     let open = ObjectBuilder::default()
         .open_file(bpf_path)
         .map_err(|e| format!("open BPF object: {}", e))?;
-    let mut obj = open
-        .load()
-        .map_err(|e| format!("load BPF object: {}", e))?;
+    let mut obj = open.load().map_err(|e| format!("load BPF object: {}", e))?;
 
     let mut attached = false;
     let mut _link = None;
@@ -145,9 +145,7 @@ fn run_sensor_loop(
     })
     .map_err(|e| format!("ringbuf add: {}", e))?;
 
-    let ringbuf = rb
-        .build()
-        .map_err(|e| format!("ringbuf build: {}", e))?;
+    let ringbuf = rb.build().map_err(|e| format!("ringbuf build: {}", e))?;
 
     eprintln!("[+] eBPF sensor attached (sched_process_exec → ringbuf)");
     loop {

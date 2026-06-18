@@ -13,7 +13,8 @@ fn home_pin_path() -> PathBuf {
 /// Streaming SHA-256 of a file (safe for multi-GB GGUF).
 pub fn sha256_file(path: &Path) -> Result<String, String> {
     use std::io::Read;
-    let mut file = std::fs::File::open(path).map_err(|e| format!("open {}: {}", path.display(), e))?;
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("open {}: {}", path.display(), e))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 1024 * 1024];
     loop {
@@ -25,7 +26,11 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect())
 }
 
 fn parse_expected_hash(text: &str) -> Option<String> {
@@ -55,6 +60,11 @@ fn expected_hash_from_pin_file(path: &Path) -> Option<String> {
 
 fn configured_expected_hash() -> Option<String> {
     if std::env::var("JETT_MODEL_VERIFY").ok().as_deref() == Some("0") {
+        eprintln!(
+            "[jett] WARNING: model integrity checking is DISABLED (JETT_MODEL_VERIFY=0). \
+             The loaded model has not been verified against a known-good hash. \
+             Only disable this in controlled environments."
+        );
         return None;
     }
     if let Ok(hash) = std::env::var("JETT_MODEL_SHA256") {
@@ -116,5 +126,23 @@ mod tests {
         let h = sha256_file(&dir).unwrap();
         assert_eq!(h.len(), 64);
         let _ = std::fs::remove_file(dir);
+    }
+
+    /// When JETT_MODEL_VERIFY=0 the function returns None (no hash to compare).
+    /// The warning is emitted to stderr as a side effect; we just verify the
+    /// function returns None in a process that won't affect other parallel tests.
+    #[test]
+    fn verify_disabled_returns_none() {
+        // Use a sub-environment so we don't permanently set the env var for
+        // other tests in the same process.
+        let orig = std::env::var("JETT_MODEL_VERIFY").ok();
+        std::env::set_var("JETT_MODEL_VERIFY", "0");
+        let result = configured_expected_hash();
+        // Restore
+        match orig {
+            Some(v) => std::env::set_var("JETT_MODEL_VERIFY", v),
+            None => std::env::remove_var("JETT_MODEL_VERIFY"),
+        }
+        assert!(result.is_none(), "expected None when JETT_MODEL_VERIFY=0");
     }
 }

@@ -30,7 +30,7 @@ bash scripts/runpod_preflight.sh 2>&1 | tee -a "$LOG"
 if [[ ! -d "$R6_CKPT" ]]; then
   log "=== seed r6 LoRA (checkpoint missing) steps=${R6_STEPS} ==="
   export JETT_SKIP_GGUF=1
-  python train_core_weights.py \
+  python training/train_core_weights.py \
     --data data/jett_training_v6.json \
     --max-steps "$R6_STEPS" \
     --batch-size "${JETT_TRAIN_BATCH:-4}" \
@@ -53,7 +53,7 @@ export JETT_SKIP_GGUF=1
 export JETT_OUTPUT_DIR=outputs/r6plus
 export JETT_GGUF_DIR=models/r6plus
 
-python train_core_weights.py \
+python training/train_core_weights.py \
   --data data/jett_training_r6plus.json \
   --max-steps "$R6PLUS_STEPS" \
   --batch-size "${JETT_TRAIN_BATCH:-4}" \

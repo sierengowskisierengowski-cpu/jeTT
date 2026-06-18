@@ -204,7 +204,7 @@ if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet jett-daem
   echo -e "  ${C_RED}[!] Stop jett-daemon first — eval needs the GPU.${C_RST}"
 fi
 run_or_show "v6 eval" \
-  "cd '$ROOT' && python3 eval_guard.py --suite v6" 1
+  "cd '$ROOT' && python3 training/eval_guard.py --suite v6" 1
 wait_enter
 
 # ── Step 8: Adversarial eval ──────────────────────────────────────────────────

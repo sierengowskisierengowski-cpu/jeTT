@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-stratified_merge.py — Round 4 dataset assembler for jeTT.
+training/stratified_merge.py — Round 4 dataset assembler for jeTT.
 
 Takes the per-bucket .jsonl files and produces ONE curated training set, the
 right way:
@@ -9,7 +9,7 @@ right way:
   2. Global dedup on input hash (a record can't appear twice)
   3. Stratify by SCENARIO bucket to target proportions (NOT raw 50/50 labels)
   4. Carve off a held-out eval set (never seen in training) — the honesty check
-  5. Convert to the exact Alpaca shape train_core_weights.py expects, with the
+  5. Convert to the exact Alpaca shape training/train_core_weights.py expects, with the
      instruction matching the runtime guard prompt and output = one word
   6. Emit a MITRE coverage report so you can see blind spots before you train
 
@@ -18,13 +18,13 @@ bucket is missing (e.g. no Bucket C yet), the remaining buckets are
 renormalized automatically — so A+B alone become ~39%/61%.
 
 RUN (uses everything available, holds out 5% for eval):
-    python3 stratified_merge.py
+    python3 training/stratified_merge.py
 
 RUN (cap size + custom eval fraction):
-    python3 stratified_merge.py --total 50000 --eval-frac 0.05
+    python3 training/stratified_merge.py --total 50000 --eval-frac 0.05
 
 OUTPUTS:
-    data/jett_training_v4.json   (Alpaca array → train_core_weights.py)  [gitignored]
+    data/jett_training_v4.json   (Alpaca array → training/train_core_weights.py)  [gitignored]
     tests/guard_eval.jsonl       (held-out eval, full records w/ reasoning)
     data/mitre_coverage.json     (technique counts + zero-coverage list)
 """
@@ -63,7 +63,7 @@ def load_buckets(patterns):
                     if not line:
                         continue
                     rec = json.loads(line)
-                    h = hashlib.sha1(rec["input"].encode()).hexdigest()
+                    h = hashlib.sha256(rec["input"].encode()).hexdigest()
                     if h in seen:
                         continue
                     seen.add(h)

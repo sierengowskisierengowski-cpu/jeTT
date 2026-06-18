@@ -8,12 +8,12 @@ use std::collections::{HashMap, VecDeque};
 /// Subset of MITRE ATT&CK technique IDs relevant to jeTT.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AttackTechnique {
-    T1059, // Command and Scripting Interpreter
-    T1053, // Scheduled Task/Job
-    T1071, // Application Layer Protocol (C2)
-    T1027, // Obfuscated Files or Information
-    T1548, // Abuse Elevation Control Mechanism
-    T1105, // Ingress Tool Transfer
+    T1059,     // Command and Scripting Interpreter
+    T1053,     // Scheduled Task/Job
+    T1071,     // Application Layer Protocol (C2)
+    T1027,     // Obfuscated Files or Information
+    T1548,     // Abuse Elevation Control Mechanism
+    T1105,     // Ingress Tool Transfer
     T1059_004, // Unix Shell
 }
 
@@ -187,6 +187,7 @@ mod tests {
             timestamp: 1,
             source: EventSource::Proc,
             inode: None,
+            start_time: None,
         }
     }
 
@@ -218,7 +219,12 @@ mod tests {
             ..Default::default()
         };
         let hit = m
-            .observe(&evt(2, "/tmp/.x", "memfd_create"), "🚨 QUARANTINE", "memfd", &intent)
+            .observe(
+                &evt(2, "/tmp/.x", "memfd_create"),
+                "🚨 QUARANTINE",
+                "memfd",
+                &intent,
+            )
             .unwrap();
         assert_eq!(hit.technique, "T1027");
     }

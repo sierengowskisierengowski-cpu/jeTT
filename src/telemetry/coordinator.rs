@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use super::event::ProcessEvent;
 
 pub struct EventCoordinator {
-    recent: HashMap<(u32, u32, u64), Instant>,
+    recent: HashMap<(u32, u32, u64, u64), Instant>,
     dedup_window: Duration,
 }
 
@@ -54,13 +54,14 @@ mod tests {
             timestamp: 1,
             source: EventSource::Proc,
             inode: Some((0, ino)),
+            start_time: None,
         }
     }
 
     #[test]
     fn dedup_key_uses_exec_event_type() {
         let e = sample(1, 42);
-        assert_eq!(e.dedup_key(), (1, JETT_EVT_EXEC, 42));
+        assert_eq!(e.dedup_key(), (1, JETT_EVT_EXEC, 42, 0));
     }
 
     #[test]

@@ -27,6 +27,6 @@ export JETT_TRAIN_GRAD_ACCUM="${JETT_TRAIN_GRAD_ACCUM:-16}"
 export JETT_TRAIN_MAX_SEQ="${JETT_TRAIN_MAX_SEQ:-512}"
 
 echo "[*] Training from $DATA (max_steps=$STEPS, batch=$JETT_TRAIN_BATCH, seq=$JETT_TRAIN_MAX_SEQ)"
-python3 train_core_weights.py
+python3 training/train_core_weights.py
 
 echo "[+] Done. GGUF under models/ — set JETT_MODEL and restart jett-daemon"

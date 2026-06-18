@@ -45,7 +45,7 @@ Unset `JETT_ENFORCE_DRY_RUN` only when you intend real kills.
 
 ```bash
 # v6 guard eval (stop daemon first if GPU-bound)
-python3 eval_guard.py --eval tests/guard_eval_v6.jsonl
+python3 training/eval_guard.py --eval tests/guard_eval_v6.jsonl
 
 # Adversarial suite (prompt injection / honeypot)
 ./scripts/run_adversarial_eval.sh

@@ -21,7 +21,7 @@ run_one() {
   echo "========== $tag =========="
   echo "model: $model"
   echo "eval:  $eval"
-  JETT_MODEL="$model" python3 eval_guard.py --eval "$eval" --jett "$JETT_BIN" \
+  JETT_MODEL="$model" python3 training/eval_guard.py --eval "$eval" --jett "$JETT_BIN" \
     --failures-out "data/eval_failures_${tag}.jsonl"
 }
 

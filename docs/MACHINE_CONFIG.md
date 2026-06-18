@@ -13,7 +13,7 @@ These files live on the host under `/etc/jett/` and `/etc/default/jett`. They ar
 ## nyx-cosmic reference (2026-06-14)
 
 ```
-JETT_MODEL=/home/cosmic/Projects/jeTT/models/jett-r6-q4_k_m.gguf
+JETT_MODEL=/opt/jett/models/jett-r6-q4_k_m.gguf
 JETT_MODE=learn
 JETT_ALLOWLIST=/etc/jett/allowlist.conf
 JETT_MODEL_PIN=/etc/jett/model.sha256

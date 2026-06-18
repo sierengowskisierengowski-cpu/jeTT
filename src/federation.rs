@@ -41,10 +41,7 @@ impl FederationHub {
 
     fn hash_signal(value: &str, kind: &str) -> HashedSignal {
         let digest = Sha256::digest(format!("{}:{}", kind, value).as_bytes());
-        let hash = digest
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect();
+        let hash = digest.iter().map(|b| format!("{:02x}", b)).collect();
         HashedSignal {
             hash,
             kind: kind.to_string(),

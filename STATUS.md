@@ -37,7 +37,7 @@ Machine-specific paths above are **not in git** (by design). Templates: `config/
 
 ## Dev / training (Python — not runtime)
 
-32 tracked Python files: `eval_guard.py`, dataset generators, RunPod training pipelines. Local `.venv/` and `intelligence/` are gitignored.
+32 tracked Python files: `training/eval_guard.py`, dataset generators, RunPod training pipelines. Local `.venv/` and `intelligence/` are gitignored.
 
 ---
 

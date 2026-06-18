@@ -8,7 +8,7 @@ REPLAY="${JETT_REPLAY:-data/jett_training_v6.json}"
 
 if [[ ! -f "$FAIL_R6" ]]; then
   echo "[!] missing $FAIL_R6 — run eval on r6 first:"
-  echo "    JETT_BIN=target/release/jeTT python3 eval_guard.py --eval tests/guard_eval_v6.jsonl --failures-out $FAIL_R6"
+  echo "    JETT_BIN=target/release/jeTT python3 training/eval_guard.py --eval tests/guard_eval_v6.jsonl --failures-out $FAIL_R6"
   exit 1
 fi
 
@@ -20,7 +20,7 @@ fi
 echo "[1/3] Re-eval r6 to refresh failure file (optional sanity)"
 JETT_BIN="${JETT_BIN:-target/release/jeTT}"
 if [[ -x "$JETT_BIN" ]]; then
-  python3 eval_guard.py --eval tests/guard_eval_v6.jsonl --jett "$JETT_BIN" \
+  python3 training/eval_guard.py --eval tests/guard_eval_v6.jsonl --jett "$JETT_BIN" \
     --failures-out "$FAIL_R6" || true
   FAIL_N=$(wc -l < "$FAIL_R6")
   echo "    r6 failures: $FAIL_N (ship bar gaps to fix)"
@@ -29,7 +29,7 @@ else
 fi
 
 echo "[2/3] Build surgical r6+ dataset (failures + v6 replay)"
-python3 build_r6plus_dataset.py \
+python3 training/build_r6plus_dataset.py \
   --failures "$FAIL_R6" \
   --replay-from "$REPLAY" \
   --replay-count "${JETT_R6PLUS_REPLAY:-3000}" \

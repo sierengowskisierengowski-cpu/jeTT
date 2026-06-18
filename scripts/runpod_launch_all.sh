@@ -44,7 +44,7 @@ rsync -az --progress \
   --exclude 'get-pip.py' \
   --exclude 'cmd/agent/target/' \
   --exclude 'bpf/*.o' \
-  scripts/ src/ train_core_weights.py eval_guard.py stratified_merge.py generate_*.py coverage/ tests/guard_eval*.jsonl docs/EBPF.md \
+  scripts/ src/ training/train_core_weights.py training/eval_guard.py training/stratified_merge.py training/generate_*.py coverage/ tests/guard_eval*.jsonl docs/EBPF.md \
   "$USER@$HOST:$REMOTE/"
 
 # Training JSON + eval (small, required)

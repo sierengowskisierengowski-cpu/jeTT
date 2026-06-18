@@ -29,7 +29,7 @@ def main():
 
     src = Path(args.failures)
     if not src.exists():
-        print(f"[!] no failures file {src} — run eval_guard.py --failures-out first")
+        print(f"[!] no failures file {src} — run training/eval_guard.py --failures-out first")
         return
 
     rows = [json.loads(l) for l in src.read_text().splitlines() if l.strip()]

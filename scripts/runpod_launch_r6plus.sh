@@ -32,7 +32,7 @@ echo "[1/4] Sync scripts + data..."
 $SSH "mkdir -p $REMOTE/data $REMOTE/models/r6plus $REMOTE/outputs/r6 $REMOTE/outputs/r6plus $REMOTE/scripts"
 rsync -az -e "$RSYNC_SSH" --no-owner --no-group scripts/ "$USER@$HOST:$REMOTE/scripts/"
 rsync -az -e "$RSYNC_SSH" --no-owner --no-group \
-  train_core_weights.py build_r6plus_dataset.py \
+  training/train_core_weights.py training/build_r6plus_dataset.py \
   "$USER@$HOST:$REMOTE/"
 rsync -az -e "$RSYNC_SSH" --no-owner --no-group \
   data/jett_training_v6.json data/jett_training_r6plus.json \

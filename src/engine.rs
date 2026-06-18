@@ -12,8 +12,8 @@ use llama_cpp_2::sampling::LlamaSampler;
 use std::io::Write as _IoWrite;
 
 use crate::telemetry::{
-    aggressive_mode, detect_evasion, honeypot_enabled, log_deception_audit,
-    print_decoy_allow, sanitize_event_for_model, should_decoy_allow, silent_quarantine_reason,
+    aggressive_mode, detect_evasion, honeypot_enabled, log_deception_audit, print_decoy_allow,
+    sanitize_event_for_model, should_decoy_allow, silent_quarantine_reason,
 };
 
 pub fn allowlist_path() -> String {
@@ -54,7 +54,11 @@ pub fn trust_binary(path: &str) {
         println!("Already trusted: {} ({})", path, &hash[..16]);
         return;
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&ap) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ap)
+    {
         let _ = writeln!(f, "{}  {}", hash, path);
         println!("Trusted: {}", path);
         println!("   SHA-256: {}", hash);
@@ -79,9 +83,14 @@ pub fn untrust_binary(path: &str) {
         .filter(|l| !l.trim_start().starts_with(&hash))
         .map(|l| l.to_string())
         .collect();
-    let _ = std::fs::write(&ap, kept.join("
-") + "
-");
+    let _ = std::fs::write(
+        &ap,
+        kept.join(
+            "
+",
+        ) + "
+",
+    );
     println!("Untrusted: {} ({})", path, &hash[..16]);
 }
 
@@ -99,7 +108,6 @@ pub fn list_trusted() {
         _ => println!("No trusted binaries yet. Add one: jett --trust /path/to/binary"),
     }
 }
-
 
 const SYSTEM_CONTEXT: &str = "You are jeTT — autonomous AI Anti-Virus and Security engine. You protect this system with zero tolerance for threats. ALWAYS ALLOW: bifrost, ollama, docker, systemd, cosmic-comp, meshtastic, gps-logger, cerberus, ghost-relay, cargo build, Govee scripts, rclone, Bambu printer, Flipper Zero, jeTT itself. ALWAYS QUARANTINE: execution from /tmp/, hidden dotfiles executing, unknown processes spawned by sshd at unusual hours, unexpected outbound connections after file downloads, privilege escalation attempts, processes reading /etc/shadow, crypto miners, reverse shells.";
 
@@ -133,12 +141,9 @@ pub fn guard_max_tokens() -> i32 {
 }
 
 pub fn new_guard_context(engine: &Engine) -> Result<LlamaContext<'_>, Box<dyn std::error::Error>> {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(
-        Some(
-            std::num::NonZeroU32::new(guard_n_ctx())
-                .unwrap_or(std::num::NonZeroU32::MIN),
-        ),
-    );
+    let ctx_params = LlamaContextParams::default().with_n_ctx(Some(
+        std::num::NonZeroU32::new(guard_n_ctx()).unwrap_or(std::num::NonZeroU32::MIN),
+    ));
     Ok(engine.model.new_context(&engine.backend, ctx_params)?)
 }
 
@@ -188,6 +193,31 @@ pub fn infer(
     infer_on_context(&mut ctx, model, prompt, max_tokens)
 }
 
+/// Extract whitespace/punctuation-delimited tokens from an uppercase model output.
+/// This avoids false positives where short labels like "C2" or "SAFE" appear
+/// as substrings inside longer unrelated words (e.g. "C2H5OH", "unsafe").
+fn verdict_tokens(up: &str) -> std::collections::HashSet<&str> {
+    up.split(|c: char| {
+        c.is_whitespace()
+            || c == ','
+            || c == '.'
+            || c == ':'
+            || c == ';'
+            || c == '!'
+            || c == '|'
+            || c == '-'
+            || c == '/'
+    })
+    .filter(|t| !t.is_empty())
+    .collect()
+}
+
+/// Return true when the model output contains a token-bounded match for `label`.
+/// Use this for short labels that could be substrings of unrelated words.
+fn has_verdict_token(tokens: &std::collections::HashSet<&str>, label: &str) -> bool {
+    tokens.contains(label)
+}
+
 pub fn guard(
     ctx: &mut LlamaContext,
     model: &LlamaModel,
@@ -235,7 +265,9 @@ pub fn guard(
     if !skip_fast_trust {
         for prefix in &trusted_prefixes {
             if exe_path.starts_with(prefix) {
-                println!("\u{1f6e1}\u{fe0f}  GUARD  \u{2192} \u{2705} ALLOW | raw: TRUSTED_PATH (0ms)");
+                println!(
+                    "\u{1f6e1}\u{fe0f}  GUARD  \u{2192} \u{2705} ALLOW | raw: TRUSTED_PATH (0ms)"
+                );
                 return Ok("ALLOW".to_string());
             }
         }
@@ -250,10 +282,10 @@ pub fn guard(
         }
     }
 
-
     let t = Instant::now();
     let result = infer_on_context(ctx, model, &prompt, guard_max_tokens())?;
     let up = result.to_uppercase();
+    let tokens = verdict_tokens(&up);
     let mut verdict = if up.contains("QUARANTINE")
         || up.contains("MALICIOUS")
         || up.contains("SUSPICIOUS")
@@ -266,7 +298,10 @@ pub fn guard(
         || up.contains("SHELLCODE")
         || up.contains("INJECTION")
         || up.contains("MINER")
-        || up.contains("CRYPTO")
+        // "CRYPTO" only as a standalone token — avoids "C2H5OH"-style false positives.
+        || has_verdict_token(&tokens, "CRYPTO")
+        || up.contains("CRYPTOMINER")
+        || up.contains("CRYPTOCURRENCY")
         || up.contains("REVERSE SHELL")
         || up.contains("EXPLOIT")
         || up.contains("BACKDOOR")
@@ -276,7 +311,10 @@ pub fn guard(
         || up.contains("UNAUTHORIZED")
         || up.contains("POLYMORPHIC")
         || up.contains("OBFUSCAT")
-        || up.contains("C2")
+        // "C2" only as a standalone token — avoids matching "C2H5OH" (ethanol), etc.
+        || has_verdict_token(&tokens, "C2")
+        || up.contains("COMMAND-AND-CONTROL")
+        || up.contains("COMMAND AND CONTROL")
         || up.contains("EXFILTRAT")
     {
         format!("🚨 QUARANTINE")
@@ -290,10 +328,11 @@ pub fn guard(
         || up.contains("BOOT SEQUENCE")
         || up.contains("NATIVE LINUX")
         || up.contains("AUTHORIZED ADMIN")
-        || up.contains("SAFE")
-        || up.contains("SCRIPTS")
+        // "SAFE" only as a standalone token — avoids "unsafe", "fail-safe", etc.
+        || has_verdict_token(&tokens, "SAFE")
+        // "SCRIPTS" only as a standalone token — avoids partial matches in paths.
+        || has_verdict_token(&tokens, "SCRIPTS")
         || up.contains("UTILITIES")
-        || up.contains("/HOME/COSMIC")
         || up.contains("USER DIRECTORY")
         || up.contains("NON-STANDARD USER")
     {
@@ -322,10 +361,7 @@ pub fn guard(
         print_decoy_allow(&event, elapsed);
         log_deception_audit(&event, &actual, &evasion);
     } else {
-        println!(
-            "🛡️  GUARD  → {} | {} ({}ms)",
-            verdict, reason, elapsed
-        );
+        println!("🛡️  GUARD  → {} | {} ({}ms)", verdict, reason, elapsed);
     }
     Ok(actual)
 }
@@ -339,8 +375,10 @@ fn build_factual_reason(event: &str, verdict: &str) -> String {
     let (_, exe_path) = crate::telemetry::parse_guard_event_fields(event);
     let cmdline = crate::telemetry::parse_guard_cmdline(event);
     if !exe_path.is_empty() {
-        if exe_path.starts_with("/tmp/") || exe_path.contains("/.cache/")
-            || exe_path.starts_with("/var/tmp/") || exe_path.contains("/Downloads/")
+        if exe_path.starts_with("/tmp/")
+            || exe_path.contains("/.cache/")
+            || exe_path.starts_with("/var/tmp/")
+            || exe_path.contains("/Downloads/")
             || exe_path.starts_with("/dev/shm/")
         {
             facts.push(format!("executed from suspicious path {}", exe_path));
@@ -436,4 +474,64 @@ pub fn load_model(model_path: &str) -> Result<Engine, Box<dyn std::error::Error>
     let params = LlamaModelParams::default().with_n_gpu_layers(99);
     let model = LlamaModel::load_from_file(&backend, &PathBuf::from(model_path), &params)?;
     Ok(Engine { backend, model })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── verdict_tokens helper ───────────────────────────────────────────────
+
+    #[test]
+    fn c2_token_matches_exactly() {
+        let tokens = verdict_tokens("THIS IS C2 TRAFFIC");
+        assert!(has_verdict_token(&tokens, "C2"));
+    }
+
+    #[test]
+    fn c2h5oh_does_not_match_c2_token() {
+        // "C2H5OH" is ethanol; should NOT trigger the C2 verdict token.
+        let tokens = verdict_tokens("PROCESS PRODUCED C2H5OH IN LAB");
+        assert!(!has_verdict_token(&tokens, "C2"));
+    }
+
+    #[test]
+    fn crypto_token_matches_standalone() {
+        let tokens = verdict_tokens("VERDICT: CRYPTO MINER DETECTED");
+        assert!(has_verdict_token(&tokens, "CRYPTO"));
+    }
+
+    #[test]
+    fn crypto_inside_word_does_not_match() {
+        // "cryptocurrency" contains "CRYPTO" but as a prefix only.
+        let tokens = verdict_tokens("LEGITIMATE CRYPTOCURRENCY WALLET");
+        // "CRYPTOCURRENCY" token does not equal "CRYPTO"
+        assert!(!has_verdict_token(&tokens, "CRYPTO"));
+    }
+
+    #[test]
+    fn safe_token_matches_standalone() {
+        let tokens = verdict_tokens("THIS PROCESS IS SAFE");
+        assert!(has_verdict_token(&tokens, "SAFE"));
+    }
+
+    #[test]
+    fn unsafe_does_not_match_safe_token() {
+        let tokens = verdict_tokens("PROCESS CALLS UNSAFE SYSCALL");
+        assert!(!has_verdict_token(&tokens, "SAFE"));
+    }
+
+    #[test]
+    fn scripts_token_matches_standalone() {
+        let tokens = verdict_tokens("ALLOW — SCRIPTS DIRECTORY");
+        assert!(has_verdict_token(&tokens, "SCRIPTS"));
+    }
+
+    #[test]
+    fn scripts_in_path_does_not_match() {
+        // A path like "/home/user/myscripts/run" should not trigger "SCRIPTS"
+        // as a verdict token since the path would be split differently.
+        let tokens = verdict_tokens("EXE /HOME/USER/MYSCRIPTS/RUN");
+        assert!(!has_verdict_token(&tokens, "SCRIPTS"));
+    }
 }

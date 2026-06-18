@@ -85,7 +85,7 @@ def main():
     parser.add_argument(
         "--data",
         default=os.getenv("JETT_TRAINING_DATA", "data/jett_training_v4.json"),
-        help="Alpaca JSON array (from stratified_merge.py)",
+        help="Alpaca JSON array (from training/stratified_merge.py)",
     )
     parser.add_argument(
         "--max-steps",
