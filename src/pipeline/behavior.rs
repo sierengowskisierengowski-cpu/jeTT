@@ -145,11 +145,16 @@ fn collect_children(pid: u32) -> Vec<String> {
 }
 
 fn behavior_profile_from(
+    pid: u32,
     all_conns: HashSet<String>,
     all_files: HashSet<String>,
     all_kids: HashSet<String>,
 ) -> String {
     let mut profile = String::new();
+    let lineage = collect_lineage(pid, 3);
+    if !lineage.is_empty() {
+        profile.push_str(&format!(" parent_lineage:[{}]", lineage));
+    }
     if !all_conns.is_empty() {
         let mut v: Vec<String> = all_conns.into_iter().collect();
         v.sort();
@@ -194,7 +199,7 @@ pub fn snapshot_behavior(pid: u32) -> (String, bool) {
     }
     let (conns, files, kids) = snapshot_once(pid);
     (
-        behavior_profile_from(conns, files, kids),
+        behavior_profile_from(pid, conns, files, kids),
         false,
     )
 }
@@ -213,7 +218,7 @@ pub fn collect_behavior(pid: u32) -> String {
 
     if behavior_mode_snapshot() {
         let (c, f, k) = snapshot_once(pid);
-        return behavior_profile_from(c, f, k);
+        return behavior_profile_from(pid, c, f, k);
     }
 
     for _ in 0..3 {
@@ -227,7 +232,7 @@ pub fn collect_behavior(pid: u32) -> String {
         thread::sleep(Duration::from_millis(500));
     }
 
-    behavior_profile_from(all_conns, all_files, all_kids)
+    behavior_profile_from(pid, all_conns, all_files, all_kids)
 }
 
 #[cfg(test)]
@@ -286,8 +291,36 @@ mod tests {
     /// When a process has no socket fds, outbound_connections must not appear in the profile.
     #[test]
     fn empty_socket_inodes_omit_outbound_connections_from_profile() {
-        let profile = behavior_profile_from(HashSet::new(), HashSet::new(), HashSet::new());
+        let profile = behavior_profile_from(1, HashSet::new(), HashSet::new(), HashSet::new());
         assert!(!profile.contains("outbound_connections"));
         assert!(profile.contains("behavior:none_observed"));
     }
+}
+
+/// Walk ancestry via /proc/<pid>/stat (ppid = field after comm), up to `depth` levels.
+/// Returns e.g. "systemd→kitty→zsh" (oldest→nearest), or empty if unreadable.
+fn collect_lineage(pid: u32, depth: usize) -> String {
+    let mut names: Vec<String> = Vec::new();
+    let mut cur = pid;
+    for _ in 0..depth {
+        let stat = match fs::read_to_string(format!("/proc/{}/stat", cur)) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let after = match stat.rfind(')') {
+            Some(i) => &stat[i + 1..],
+            None => break,
+        };
+        let ppid: u32 = match after.split_whitespace().nth(1).and_then(|s| s.parse().ok()) {
+            Some(p) if p >= 1 => p,
+            _ => break,
+        };
+        if let Ok(name) = fs::read_to_string(format!("/proc/{}/comm", ppid)) {
+            names.push(name.trim().to_string());
+        }
+        if ppid == 1 { break; }
+        cur = ppid;
+    }
+    names.reverse();
+    names.join("→")
 }
