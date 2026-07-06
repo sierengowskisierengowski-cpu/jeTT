@@ -13,8 +13,10 @@ TS_MIN, TS_MAX = 1749000000, 1781300000
 EVIL = ["185.220.101.45:4444", "45.137.21.9:9001"]
 
 
-def fmt(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
+def fmt(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None, lineage=None):
     base = f"{name} PID:{pid} uid:{uid} exe:{exe} cmd:{cmd} time:{ts}"
+    if lineage:
+        base += " parent_lineage:[" + "\u2192".join(lineage) + "]"
     if conns:
         base += f" outbound_connections:[{','.join(sorted(conns))}]"
     if files:
@@ -25,6 +27,19 @@ def fmt(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
         base += " behavior:none_observed"
     return base
 
+
+MALICIOUS_LINEAGE = [
+    ["nginx","sh"],["nginx","bash","sh"],["systemd","containerd-shim","bash"],
+    ["containerd-shim","bash","curl"],["sshd","bash","sh"],["systemd","sh","curl"],
+    ["cron","bash"],["apache2","sh"],
+]
+BENIGN_LINEAGE = [
+    ["systemd"],["systemd","systemd"],["systemd","systemd","python3"],
+    ["systemd","cosmic-comp","kitty","zsh","bash"],
+]
+def _lin_for(output):
+    import random
+    return random.choice(BENIGN_LINEAGE if output=="ALLOW" else MALICIOUS_LINEAGE)
 
 TEMPLATES = [
     dict(category="lolbin_abuse", bucket="threat", mitre=["T1053.002", "T1059.004"],
@@ -75,7 +90,8 @@ def main():
                 "tags": ["lolbin", "round6"],
                 "input": fmt(t["name"], random.randint(1000, 99999), t["uid"], t["exe"],
                              t["cmd"], random.randint(TS_MIN, TS_MAX),
-                             t.get("conns"), t.get("files"), t.get("kids")),
+                             t.get("conns"), t.get("files"), t.get("kids"),
+                             _lin_for(t["output"])),
                 "output": t["output"],
                 "reasoning": t["reasoning"],
             }

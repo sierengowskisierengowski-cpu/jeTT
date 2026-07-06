@@ -23,8 +23,10 @@ BENIGN_IPS = ["151.101.54.132:443", "104.18.32.47:443", "140.82.121.4:443"]
 EVIL_IPS = ["185.220.100.252:4444", "45.137.21.9:9001", "171.25.193.77:4444"]
 
 
-def behavior_suffix(conns=None, files=None, kids=None):
+def behavior_suffix(conns=None, files=None, kids=None, lineage=None):
     parts = ""
+    if lineage:
+        parts += " parent_lineage:[" + "\u2192".join(lineage) + "]"
     if conns:
         parts += f" outbound_connections:[{','.join(sorted(conns))}]"
     if files:
@@ -36,9 +38,22 @@ def behavior_suffix(conns=None, files=None, kids=None):
     return parts
 
 
-def format_guard_event(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
+def format_guard_event(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None, lineage=None):
     base = f"{name} PID:{pid} uid:{uid} exe:{exe} cmd:{cmd} time:{ts}"
-    return base + behavior_suffix(conns, files, kids)
+    return base + behavior_suffix(conns, files, kids, lineage)
+
+MALICIOUS_LINEAGE = [
+    ["nginx","sh"],["nginx","bash","sh"],["systemd","containerd-shim","bash"],
+    ["containerd-shim","bash","curl"],["sshd","bash","sh"],["systemd","sh","curl"],
+    ["cron","bash"],["apache2","sh"],
+]
+BENIGN_LINEAGE = [
+    ["systemd"],["systemd","systemd"],["systemd","systemd","python3"],
+    ["systemd","cosmic-comp","kitty","zsh","bash"],
+]
+def _lin_for_side(side):
+    return random.choice(BENIGN_LINEAGE if side == "allow" else MALICIOUS_LINEAGE)
+
 
 
 # Each entry: allow variant + quarantine variant (paired)
@@ -334,7 +349,7 @@ def emit(pair_def, side: str, pid: int, ts: int) -> dict:
     kids = spec.get("kids")
     inp = format_guard_event(
         spec["name"], pid, spec["uid"], spec["exe"], spec["cmd"], ts,
-        conns=conns, files=files, kids=kids,
+        conns=conns, files=files, kids=kids, lineage=_lin_for_side(side),
     )
     out = "ALLOW" if side == "allow" else "QUARANTINE"
     return {

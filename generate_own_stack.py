@@ -13,8 +13,10 @@ TS_MIN, TS_MAX = 1749000000, 1781300000
 LAN = ["192.168.0.1:8443", "127.0.0.1:6969", "192.168.0.1:9090"]
 
 
-def fmt(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
+def fmt(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None, lineage=None):
     base = f"{name} PID:{pid} uid:{uid} exe:{exe} cmd:{cmd} time:{ts}"
+    if lineage:
+        base += " parent_lineage:[" + "\u2192".join(lineage) + "]"
     if conns:
         base += f" outbound_connections:[{','.join(sorted(conns))}]"
     if files:
@@ -26,46 +28,55 @@ def fmt(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
     return base
 
 
+BENIGN_LINEAGE = [
+    ["systemd"], ["systemd", "systemd"],
+    ["systemd", "systemd", "python3"],
+    ["systemd", "containerd-shim"],
+    ["systemd", "containerd-shim", "runc"],
+    ["systemd", "cosmic-comp", "kitty", "zsh", "bash"],
+]
+def _benign_lin(): return random.choice(BENIGN_LINEAGE)
+
 TEMPLATES = [
-    dict(name="jett-daemon", exe="/home/cosmic/Projects/jeTT/target/release/jett-daemon",
+    dict(lineage=_benign_lin, name="jett-daemon", exe="/home/cosmic/Projects/jeTT/target/release/jett-daemon",
          cmd="", uid=0, category="own_stack",
          conns=LAN[:1], kids=["jeTT"],
          mitre=["T1082"], reasoning="jeTT daemon loading Granite guard model; expected stack."),
-    dict(name="jeTT", exe="/home/cosmic/Projects/jeTT/target/release/jeTT",
+    dict(lineage=_benign_lin, name="jeTT", exe="/home/cosmic/Projects/jeTT/target/release/jeTT",
          cmd="--guard", uid=1000, category="own_stack",
          mitre=["T1059"], reasoning="jeTT CLI guard inference; core product path."),
-    dict(name="bifrost", exe="/home/cosmic/Projects/bifrost/target/release/bifrost",
+    dict(lineage=_benign_lin, name="bifrost", exe="/home/cosmic/Projects/bifrost/target/release/bifrost",
          cmd="--api", uid=1000, category="own_stack",
          conns=LAN[:2], mitre=["T1071.001"],
          reasoning="Bifrost dashboard API on LAN; authorized security UI."),
-    dict(name="cerberus", exe="/usr/local/bin/cerberus-guardian",
+    dict(lineage=_benign_lin, name="cerberus", exe="/usr/local/bin/cerberus-guardian",
          cmd="--honeypot", uid=0, category="own_stack",
          conns=LAN[2:3], files=["/var/log/cerberus/events.log"],
          mitre=["T1082"], reasoning="Cerberus honeypot listener; defensive component."),
-    dict(name="python3", exe="/usr/bin/python3",
+    dict(lineage=_benign_lin, name="python3", exe="/usr/bin/python3",
          cmd="/home/cosmic/Projects/jeTT/generate_threats.py --count 100",
          uid=1000, category="own_stack",
          mitre=["T1059.006"], reasoning="jeTT training data generator; dev workflow."),
-    dict(name="jett-control.sh", exe="/bin/bash",
+    dict(lineage=_benign_lin, name="jett-control.sh", exe="/bin/bash",
          cmd="/home/cosmic/Projects/jeTT/jett-control.sh", uid=1000, category="own_stack",
          mitre=["T1059.004"], reasoning="jeTT control menu script; operator tool."),
-    dict(name="cowrie", exe="/usr/bin/python3",
+    dict(lineage=_benign_lin, name="cowrie", exe="/usr/bin/python3",
          cmd="/opt/cowrie/bin/cowrie", uid=999, category="own_stack",
          conns=["0.0.0.0:2222"], mitre=["T1071.001"],
          reasoning="Cowrie SSH honeypot; intentional inbound listener on lab network."),
-    dict(name="gni-agent", exe="/home/cosmic/Projects/GNI/target/release/gni-agent",
+    dict(lineage=_benign_lin, name="gni-agent", exe="/home/cosmic/Projects/GNI/target/release/gni-agent",
          cmd="--watch", uid=1000, category="own_stack",
          conns=LAN[:1], mitre=["T1082"],
          reasoning="GNI network inventory agent; authorized monitoring on LAN."),
-    dict(name="steam", exe="/home/cosmic/.local/share/Steam/ubuntu12_64/steam",
+    dict(lineage=_benign_lin, name="steam", exe="/home/cosmic/.local/share/Steam/ubuntu12_64/steam",
          cmd="", uid=1000, category="own_stack",
          conns=["162.254.196.0:443"], mitre=["T1071.001"],
          reasoning="Steam client game networking; user-installed entertainment software."),
-    dict(name="govee2mqtt", exe="/usr/bin/node",
+    dict(lineage=_benign_lin, name="govee2mqtt", exe="/usr/bin/node",
          cmd="/home/cosmic/Projects/govee2mqtt/index.js", uid=1000, category="own_stack",
          conns=LAN[:1], mitre=["T1071.001"],
          reasoning="Govee smart-home MQTT bridge; LAN IoT integration."),
-    dict(name="python3", exe="/usr/bin/python3",
+    dict(lineage=_benign_lin, name="python3", exe="/usr/bin/python3",
          cmd="/home/cosmic/Scripts/utilities/govee-art.sh", uid=1000, category="own_stack",
          mitre=["T1059.006"], reasoning="Govee LED art utility script; benign home automation."),
 ]
@@ -90,7 +101,8 @@ def main():
                 "tags": ["own_stack", "round6"],
                 "input": fmt(t["name"], random.randint(100, 9999), t["uid"], t["exe"],
                              t["cmd"], random.randint(TS_MIN, TS_MAX),
-                             t.get("conns"), t.get("files"), t.get("kids")),
+                             t.get("conns"), t.get("files"), t.get("kids"),
+                             (t["lineage"]() if callable(t.get("lineage")) else t.get("lineage"))),
                 "output": "ALLOW",
                 "reasoning": t["reasoning"],
             }

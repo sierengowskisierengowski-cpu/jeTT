@@ -54,8 +54,10 @@ TS_MIN = 1749000000
 TS_MAX = 1781300000
 
 
-def behavior_suffix(conns=None, files=None, kids=None):
+def behavior_suffix(conns=None, files=None, kids=None, lineage=None):
     parts = ""
+    if lineage:
+        parts += " parent_lineage:[" + "\u2192".join(lineage) + "]"
     if conns:
         parts += f" outbound_connections:[{','.join(sorted(conns))}]"
     if files:
@@ -67,11 +69,11 @@ def behavior_suffix(conns=None, files=None, kids=None):
     return parts
 
 
-def format_guard_event(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
+def format_guard_event(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None, lineage=None):
     """The one true dialect. Use this in ALL bucket generators so the model
     only ever sees one input shape — the one the daemon actually emits."""
     base = f"{name} PID:{pid} uid:{uid} exe:{exe} cmd:{cmd} time:{ts}"
-    return base + behavior_suffix(conns, files, kids)
+    return base + behavior_suffix(conns, files, kids, lineage)
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +118,32 @@ def _conns(pool, lo=1, hi=3):
     return lambda: [rip(pool) for _ in range(random.randint(lo, hi))]
 
 
+# Benign lineage pools (r7 lineage-aware FP-armor)
+SHELL_LINEAGE = [
+    ["systemd", "cosmic-comp", "kitty", "zsh", "bash"],
+    ["systemd", "cosmic-comp", "kitty", "bash"],
+    ["systemd", "sshd", "bash"],
+    ["bash", "bash", "bash"],
+]
+SERVICE_LINEAGE = [
+    ["systemd"],
+    ["systemd", "systemd"],
+    ["systemd", "systemd", "python3"],
+    ["systemd", "containerd-shim"],
+    ["systemd", "containerd-shim", "runc"],
+    ["systemd", "docker"],
+    ["systemd", "sshd"],
+]
+def _shell_lin():   return random.choice(SHELL_LINEAGE)
+def _service_lin(): return random.choice(SERVICE_LINEAGE)
+
 TEMPLATES = [
     # --- Backup / integrity / AV : reads credential files, phones home -------
     dict(
         name="system_backup_tool", exe="/usr/local/bin/system_backup_tool",
         cmds=["--full-scan", "--incremental --verify", "--integrity-hash /etc"],
         uid=0, category="backup_integrity",
+        lineage=_service_lin,
         files=lambda: ["/etc/passwd", "/etc/shadow", "/etc/group"][: random.randint(2, 3)],
         conns=_conns(BENIGN_IPS, 1, 1),
         mitre=["T1003.008", "T1082"],
@@ -132,6 +154,7 @@ TEMPLATES = [
         name="rclone", exe="/usr/bin/rclone",
         cmds=["sync /home/cosmic/Backups remote:gowski", "copy ~/Documents remote:codex --progress"],
         uid=1000, category="backup_integrity",
+        lineage=_service_lin,
         files=lambda: ["/home/cosmic/.config/rclone/rclone.conf"],
         conns=_conns(BENIGN_IPS, 1, 3),
         mitre=["T1567.002"],
@@ -142,6 +165,7 @@ TEMPLATES = [
         name="restic", exe="/usr/bin/restic",
         cmds=["backup /etc /home --tag nightly", "prune --repo remote"],
         uid=0, category="backup_integrity",
+        lineage=_service_lin,
         files=lambda: ["/etc/passwd", "/etc/shadow", "/etc/ssh/sshd_config"][: random.randint(1, 3)],
         conns=_conns(BENIGN_IPS, 1, 2),
         mitre=["T1003", "T1082"],
@@ -154,6 +178,7 @@ TEMPLATES = [
         name="cargo", exe="/home/cosmic/.cargo/bin/cargo",
         cmds=["build --release", "test --release", "run --release"],
         uid=1000, category="dev_toolchain",
+        lineage=_shell_lin,
         kids=lambda: random.sample(["rustc", "cc", "ld", "build-script-build", "ar"], k=random.randint(2, 4)),
         conns=lambda: ([rip(BENIGN_IPS)] if random.random() < 0.4 else None),  # crates.io fetch
         mitre=["T1059.004"],
@@ -163,6 +188,7 @@ TEMPLATES = [
     dict(
         name=".tmpXXXX", exe="/tmp/cargo-installXXXXXX/release/jett-test",
         cmds=["--selftest", ""], uid=1000, category="dev_toolchain",
+        lineage=_shell_lin,
         kids=lambda: ["sh"] if random.random() < 0.3 else None,
         mitre=["T1059"],
         tags=["exec_from_tmp", "dev_artifact"],
@@ -172,6 +198,7 @@ TEMPLATES = [
         name="rustc", exe="/home/cosmic/.rustup/toolchains/stable/bin/rustc",
         cmds=["--edition 2021 src/main.rs -o /tmp/.build-out"], uid=1000,
         category="dev_toolchain",
+        lineage=_shell_lin,
         files=lambda: None, kids=lambda: ["cc", "ld"][: random.randint(1, 2)],
         mitre=["T1027"],
         tags=["writes_tmp", "spawns_linker"],
@@ -182,6 +209,7 @@ TEMPLATES = [
     dict(
         name="pacman", exe="/usr/bin/pacman",
         cmds=["-Syu --noconfirm", "-S base-devel"], uid=0, category="package_manager",
+        lineage=_service_lin,
         kids=lambda: random.sample(["gpg", "tar", "ldconfig", "systemd-hwdb", "install"], k=random.randint(2, 4)),
         conns=_conns(BENIGN_IPS, 1, 3),
         files=lambda: ["/etc/pacman.d/mirrorlist"] if random.random() < 0.5 else None,
@@ -193,6 +221,7 @@ TEMPLATES = [
         name="pip", exe="/usr/bin/python3",
         cmds=["-m pip install --break-system-packages unsloth", "-m pip install -r requirements.txt"],
         uid=1000, category="package_manager",
+        lineage=_service_lin,
         conns=_conns(BENIGN_IPS, 1, 2),
         kids=lambda: ["gcc", "cc"] if random.random() < 0.4 else None,
         mitre=["T1059.006"],
@@ -204,6 +233,7 @@ TEMPLATES = [
     dict(
         name="node_exporter", exe="/usr/bin/node_exporter",
         cmds=["--web.listen-address=:9100"], uid=1000, category="monitoring",
+        lineage=_service_lin,
         conns=lambda: [f"{random.choice(LAN_IPS)}:9090"],
         files=lambda: ["/proc/stat", "/proc/meminfo", "/proc/net/dev"][: random.randint(2, 3)],
         mitre=["T1082"],
@@ -213,6 +243,7 @@ TEMPLATES = [
     dict(
         name="prometheus", exe="/usr/bin/prometheus",
         cmds=["--config.file=/etc/prometheus/prometheus.yml"], uid=1000, category="monitoring",
+        lineage=_service_lin,
         conns=lambda: [f"{random.choice(LAN_IPS)}:9100", f"{random.choice(LAN_IPS)}:8080"][: random.randint(1, 2)],
         mitre=["T1082"],
         tags=["scrapes_targets", "binds_port", "outbound_lan"],
@@ -223,6 +254,7 @@ TEMPLATES = [
     dict(
         name="bifrost", exe="/home/cosmic/Projects/bifrost/app/bifrost-desktop/src-tauri/target/release/bifrost",
         cmds=["--guardian", ""], uid=1000, category="own_stack",
+        lineage=_service_lin,
         conns=lambda: [f"{random.choice(LAN_IPS)}:11434", rip(BENIGN_IPS)][: random.randint(1, 2)],
         files=lambda: ["/proc/self/status"] if random.random() < 0.3 else None,
         mitre=["T1071"],
@@ -232,6 +264,7 @@ TEMPLATES = [
     dict(
         name="ghost-relay", exe="/home/cosmic/Projects/c2/teamserver/ghost-relay",
         cmds=["--listen 0.0.0.0:8443", "--lab-mode"], uid=1000, category="own_stack",
+        lineage=_service_lin,
         conns=lambda: [f"{random.choice(LAN_IPS)}:8443"],
         mitre=["T1071", "T1571"],
         tags=["outbound", "name_looks_evil", "binds_port"],
@@ -240,6 +273,7 @@ TEMPLATES = [
     dict(
         name="ollama", exe="/usr/local/bin/ollama",
         cmds=["serve", "run qwen2.5:7b-instruct"], uid=1000, category="own_stack",
+        lineage=_service_lin,
         conns=lambda: ([rip(BENIGN_IPS)] if random.random() < 0.5 else [f"{random.choice(LAN_IPS)}:11434"]),
         mitre=["T1071"],
         tags=["outbound", "model_pull", "high_mem"],
@@ -248,6 +282,7 @@ TEMPLATES = [
     dict(
         name="gni_server.py", exe="/home/cosmic/Projects/GNI/gni_server.py",
         cmds=["--port 6969"], uid=1000, category="own_stack",
+        lineage=_service_lin,
         conns=lambda: [rip(BENIGN_IPS)],  # Anthropic API
         files=lambda: ["/home/cosmic/.gni_config"] if random.random() < 0.4 else None,
         mitre=["T1071.001"],
@@ -257,6 +292,7 @@ TEMPLATES = [
     dict(
         name="cowrie", exe="/home/cosmic/Projects/honeypot/cowrie/bin/cowrie",
         cmds=["start", ""], uid=1000, category="own_stack",
+        lineage=_service_lin,
         conns=lambda: [f"{random.choice(LAN_IPS)}:2222", f"{random.choice(LAN_IPS)}:23"][: random.randint(1, 2)],
         mitre=["T1071"],
         tags=["binds_low_ports", "sees_attack_traffic", "looks_malicious"],
@@ -267,6 +303,7 @@ TEMPLATES = [
     dict(
         name="dockerd", exe="/usr/bin/dockerd", cmds=["", "--containerd=/run/containerd/containerd.sock"],
         uid=0, category="containers",
+        lineage=_service_lin,
         kids=lambda: random.sample(["containerd-shim", "runc", "docker-proxy", "containerd"], k=random.randint(2, 4)),
         conns=lambda: [f"{random.choice(LAN_IPS)}:2375"] if random.random() < 0.2 else None,
         mitre=["T1610"],
@@ -276,6 +313,7 @@ TEMPLATES = [
     dict(
         name="runc", exe="/usr/bin/runc", cmds=["init", "--root /run/containerd ..."],
         uid=0, category="containers",
+        lineage=_service_lin,
         kids=lambda: ["sh", "bash"][: random.randint(1, 2)] if random.random() < 0.5 else None,
         mitre=["T1610"],
         tags=["root_uid", "spawns_shell", "container_init"],
@@ -286,6 +324,7 @@ TEMPLATES = [
     dict(
         name="python3", exe="/home/cosmic/Scripts/utilities/govee-art.sh",
         cmds=["--scene sunset", "--sync-clock"], uid=1000, category="smarthome",
+        lineage=_service_lin,
         conns=lambda: [rip(BENIGN_IPS)],  # api.govee.com behind Cloudflare
         mitre=["T1071.001"],
         tags=["outbound", "python_interpreter", "api_call"],
@@ -294,6 +333,7 @@ TEMPLATES = [
     dict(
         name="gps-logger", exe="/home/cosmic/Scripts/deployed/gps-logger.py",
         cmds=["--interval 30"], uid=1000, category="smarthome",
+        lineage=_service_lin,
         files=lambda: ["/home/cosmic/Docs/Notes/gps-track.log"] if random.random() < 0.3 else None,
         conns=lambda: [rip(BENIGN_IPS)] if random.random() < 0.4 else None,
         mitre=["T1082"],
@@ -305,6 +345,7 @@ TEMPLATES = [
     dict(
         name="sshd", exe="/usr/bin/sshd", cmds=["-D", "session opened for cosmic"],
         uid=0, category="admin_maintenance",
+        lineage=_service_lin,
         kids=lambda: ["bash", "zsh"][: 1] if random.random() < 0.6 else None,
         conns=lambda: [f"{random.choice(LAN_IPS)}:22"],
         mitre=["T1021.004"],
@@ -314,6 +355,7 @@ TEMPLATES = [
     dict(
         name="sudo", exe="/usr/bin/sudo", cmds=["systemctl restart jett-daemon", "pacman -Syu"],
         uid=0, category="admin_maintenance",
+        lineage=_service_lin,
         kids=lambda: random.sample(["systemctl", "pacman", "nano", "cp"], k=1),
         mitre=["T1548.003"],
         tags=["root_uid", "privilege_use", "interactive"],
@@ -322,6 +364,7 @@ TEMPLATES = [
     dict(
         name="systemctl", exe="/usr/bin/systemctl", cmds=["restart docker", "enable nyx-honeypot.service"],
         uid=0, category="admin_maintenance",
+        lineage=_service_lin,
         files=lambda: ["/etc/systemd/system/jett-daemon.service"] if random.random() < 0.3 else None,
         mitre=["T1543.002"],
         tags=["root_uid", "edits_units"],
@@ -330,6 +373,7 @@ TEMPLATES = [
     dict(
         name="nvidia-smi", exe="/usr/bin/nvidia-smi", cmds=["", "-q -d MEMORY"],
         uid=1000, category="monitoring",
+        lineage=_service_lin,
         files=lambda: ["/proc/driver/nvidia/gpus"] if random.random() < 0.3 else None,
         mitre=["T1082"],
         tags=["reads_proc", "hardware_query"],
@@ -340,6 +384,7 @@ TEMPLATES = [
     dict(
         name="flatpak", exe="/usr/bin/flatpak", cmds=["update --appstream", "install flathub com.valvesoftware.Steam"],
         uid=1000, category="desktop_apps",
+        lineage=_service_lin,
         conns=_conns(BENIGN_IPS, 1, 2),
         kids=lambda: ["bwrap", "xdg-dbus-proxy"][: random.randint(1, 2)],
         mitre=["T1072"],
@@ -349,6 +394,7 @@ TEMPLATES = [
     dict(
         name="steam", exe="/home/cosmic/.local/share/Steam/ubuntu12_64/steam",
         cmds=["-silent", "-applaunch 730"], uid=1000, category="desktop_apps",
+        lineage=_service_lin,
         conns=_conns(BENIGN_IPS, 1, 3),
         kids=lambda: ["steamwebhelper", "GameOverlayUI"][: random.randint(1, 2)],
         mitre=["T1071.001"],
@@ -358,6 +404,7 @@ TEMPLATES = [
     dict(
         name="wg-quick", exe="/usr/bin/wg-quick", cmds=["up wg0", "down wg0"],
         uid=0, category="network_vpn",
+        lineage=_service_lin,
         files=lambda: ["/etc/wireguard/wg0.conf"],
         conns=lambda: [f"{random.choice(LAN_IPS)}:51820"],
         mitre=["T1071"],
@@ -367,6 +414,7 @@ TEMPLATES = [
     dict(
         name="kubectl", exe="/usr/bin/kubectl", cmds=["apply -f deployment.yaml", "port-forward svc/api 8443:443"],
         uid=1000, category="containers",
+        lineage=_service_lin,
         conns=lambda: [f"{random.choice(LAN_IPS)}:6443"],
         kids=lambda: ["kubectl"] if random.random() < 0.3 else None,
         mitre=["T1072", "T1021"],
@@ -376,6 +424,7 @@ TEMPLATES = [
     dict(
         name="docker", exe="/usr/bin/docker", cmds=["compose up -d", "run --rm -it archlinux"],
         uid=1000, category="containers",
+        lineage=_service_lin,
         kids=lambda: random.sample(["containerd-shim", "runc", "docker-proxy"], k=2),
         conns=_conns(BENIGN_IPS, 0, 1),
         mitre=["T1610"],
@@ -385,6 +434,7 @@ TEMPLATES = [
     dict(
         name="obs", exe="/usr/bin/obs", cmds=["--startreplaybuffer", ""],
         uid=1000, category="desktop_apps",
+        lineage=_service_lin,
         kids=lambda: ["obs-ffmpeg-mux"] if random.random() < 0.5 else None,
         files=lambda: ["/home/cosmic/Videos"] if random.random() < 0.3 else None,
         mitre=["T1059"],
@@ -423,9 +473,10 @@ def make_record(t):
     conns = resolve(t.get("conns")) if "conns" in t else None
     files = resolve(t.get("files")) if "files" in t else None
     kids = resolve(t.get("kids")) if "kids" in t else None
+    lineage = resolve(t.get("lineage")) if "lineage" in t else None
 
     inp = format_guard_event(name, rand_pid(), uid, exe, cmd, ts,
-                             conns=conns, files=files, kids=kids)
+                             conns=conns, files=files, kids=kids, lineage=lineage)
 
     return {
         "bucket": "legit_scary",

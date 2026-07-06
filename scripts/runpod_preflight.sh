@@ -1,31 +1,52 @@
 #!/usr/bin/env bash
-# Quick venv sanity check before GPU train — fail fast with clear errors.
+# jeTT RunPod preflight — sanity checks before training starts.
 set -euo pipefail
-cd /workspace/jett
-source .venv/bin/activate
-pip uninstall -y torchao 2>/dev/null || true
+cd "$(dirname "$0")/.."
 
-python - <<'PY'
-import sys
-import torch
-print(f"python={sys.executable}")
-print(f"torch={torch.__version__} cuda={torch.cuda.is_available()}")
-if not torch.cuda.is_available():
-    raise SystemExit("CUDA not available")
+log() { echo "[preflight] $*"; }
 
-import bitsandbytes as bnb
-print(f"bitsandbytes={bnb.__version__}")
+FAIL=0
+check() {
+    local label="$1"; shift
+    if "$@" >/dev/null 2>&1; then
+        log "✓ $label"
+    else
+        log "✗ $label FAILED"
+        FAIL=$((FAIL + 1))
+    fi
+}
 
-from transformers.utils import is_bitsandbytes_available
-if not is_bitsandbytes_available():
-    raise SystemExit("transformers reports bitsandbytes unavailable — reinstall bitsandbytes")
+log "running preflight checks..."
 
-import transformers
-print(f"transformers={transformers.__version__}")
+# Python + CUDA
+check "python3 available" python3 --version
+check "torch importable" python3 -c "import torch"
+check "CUDA available" python3 -c "import torch; assert torch.cuda.is_available()"
+check "unsloth importable" python3 -c "from unsloth import FastLanguageModel"
 
-import unsloth  # noqa: F401
-from unsloth import FastLanguageModel
-print("unsloth import ok")
-PY
+# GPU VRAM — need at least 12GB for 2B + LoRA
+VRAM=$(python3 -c "import torch; print(torch.cuda.get_device_properties(0).total_memory // 1024**3)" 2>/dev/null || echo 0)
+log "  GPU: $(python3 -c "import torch; print(torch.cuda.get_device_name(0))" 2>/dev/null || echo unknown)  VRAM: ${VRAM}GB"
+if (( VRAM < 12 )); then
+    log "✗ insufficient VRAM: need ≥12GB, have ${VRAM}GB"
+    FAIL=$((FAIL + 1))
+else
+    log "✓ VRAM ${VRAM}GB sufficient"
+fi
 
-echo "[preflight] ok"
+# training data
+DATA="${JETT_TRAINING_DATA:-data/jett_training_v11.json}"
+if [ -f "$DATA" ]; then
+    SIZE=$(du -sh "$DATA" | cut -f1)
+    log "✓ training data found: $DATA ($SIZE)"
+else
+    log "✗ training data MISSING: $DATA"
+    FAIL=$((FAIL + 1))
+fi
+
+if (( FAIL > 0 )); then
+    log "preflight FAILED ($FAIL check(s)) — aborting training"
+    exit 1
+fi
+
+log "preflight passed — ready to train"

