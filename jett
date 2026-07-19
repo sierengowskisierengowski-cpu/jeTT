@@ -31,7 +31,7 @@ case "${1:-}" in
   ""|menu|panel)
     exec "${CTL}" menu
     ;;
-  start|stop|restart|status|logs|audit|quarantine|quar|config|cfg|mode|model|rebuild|build|smoke|art|demo|help|-h|--help)
+  start|stop|restart|status|stats|dashboard|dash|logs|audit|quarantine|quar|config|cfg|mode|model|rebuild|build|smoke|art|demo|help|-h|--help)
     exec "${CTL}" "$@"
     ;;
   guard|alert|query)

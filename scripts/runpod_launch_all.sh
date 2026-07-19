@@ -3,12 +3,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-HOST="${RUNPOD_HOST:-194.68.245.125}"
-PORT="${RUNPOD_PORT:-22146}"
+HOST="${RUNPOD_HOST:-194.68.245.85}"
+PORT="${RUNPOD_PORT:-22102}"
 USER="${RUNPOD_USER:-root}"
 REMOTE="${RUNPOD_DIR:-/workspace/jett}"
-SSH="ssh -o StrictHostKeyChecking=no -p $PORT $USER@$HOST"
-RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p $PORT"
+KEY="${RUNPOD_KEY:-$HOME/.ssh/id_rsa}"
+SSH="ssh -o StrictHostKeyChecking=no -p $PORT -i $KEY $USER@$HOST"
+RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p $PORT -i $KEY"
 
 echo "=============================================="
 echo " jeTT RunPod one-shot (r6+r7 train + GGUF)"

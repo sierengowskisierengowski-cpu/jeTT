@@ -19,3 +19,8 @@ crossbeam-channel = { version = "0.5", optional = true }
 [[bin]]
 name = "jett-daemon"
 path = "src/bin/daemon.rs"
+
+[[bin]]
+name = "jett-sensor-test"
+path = "src/bin/sensor_test.rs"
+required-features = ["ebpf"]

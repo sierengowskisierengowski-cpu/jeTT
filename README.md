@@ -2,6 +2,15 @@
 
 jeTT is a Linux AI EDR (Endpoint Detection and Response) product: a local `jett-daemon` watches new processes, profiles behavior, and runs an on-box Granite guard model to produce **ALLOW** or **QUARANTINE** verdicts. Default operation is **learn mode** (log would-quarantine, no kills); **enforce mode** is opt-in.
 
+## Quick check (learn or enforce)
+
+```bash
+jett stats        # one-shot dashboard
+jett stats -w     # live refresh every 5s
+```
+
+Shows ALLOW, WOULD-quarantine (learn), QUARANTINE (enforce), recent flags, and side-log counts.
+
 ## Quick start
 
 ```bash

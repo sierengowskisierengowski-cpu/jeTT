@@ -38,3 +38,4 @@ internal/kernel/vmlinux.h
 cmd/**/target/
 models/*.gguf
 cmd/server/cerberus-tower
+*.bak

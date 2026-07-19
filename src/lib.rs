@@ -16,6 +16,7 @@ pub mod risk_graph;
 pub mod syscall_fingerprint;
 pub mod telemetry;
 pub mod tier7_hooks;
+pub mod verdict_store;
 
 #[cfg(feature = "ebpf")]
 pub mod ebpf;

@@ -63,11 +63,21 @@ enforce_check() {
   echo "[enforce] preflight — enforce path (dry-run required)"
   load_defaults
 
-  check "JETT_MODE=enforce" \
-    '[[ "${JETT_MODE:-learn}" =~ ^[Ee]nforce ]]'
+  if [[ "${JETT_MODE:-learn}" =~ ^[Ee]nforce ]]; then
+    echo "  [ok] JETT_MODE=enforce"
+    PASS=$((PASS + 1))
+  else
+    echo "  [FAIL] JETT_MODE=enforce (got: ${JETT_MODE:-unset})"
+    FAIL=$((FAIL + 1))
+  fi
 
-  check "JETT_ENFORCE_DRY_RUN=1" \
-    '[[ "${JETT_ENFORCE_DRY_RUN:-}" =~ ^(1|true|yes|TRUE|YES)$ ]]'
+  if [[ "${JETT_ENFORCE_DRY_RUN:-}" =~ ^(1|true|yes|TRUE|YES)$ ]]; then
+    echo "  [ok] JETT_ENFORCE_DRY_RUN=1"
+    PASS=$((PASS + 1))
+  else
+    echo "  [FAIL] JETT_ENFORCE_DRY_RUN=1 (got: ${JETT_ENFORCE_DRY_RUN:-unset})"
+    FAIL=$((FAIL + 1))
+  fi
 
   if command -v systemctl >/dev/null 2>&1; then
     check "jett-daemon active" systemctl is-active --quiet jett-daemon

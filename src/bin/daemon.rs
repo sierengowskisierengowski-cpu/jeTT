@@ -14,10 +14,11 @@ use jeTT::tier7_hooks::{process_verdict, VerdictContext};
 use jeTT::engine::{alert as engine_alert, load_model, new_guard_context, guard as engine_guard, Engine};
 use jeTT::pipeline::behavior::{collect_behavior, snapshot_behavior};
 use jeTT::telemetry::{
-    detect_evasion, daemon_is_trusted, hard_quarantine_reason, honeypot_enabled,
-    log_deception_audit, max_event_len, normalize_proc_name, own_stack_fast_allow,
-    parse_telemetry_mode, plausible_allow_reason, should_decoy_allow, stat_inode,
-    telemetry_mode_label, EventSource, ProcessEvent, TelemetryMode,
+    check_recent_allow, detect_evasion, daemon_is_trusted, hard_quarantine_reason,
+    honeypot_enabled, log_deception_audit, max_event_len, normalize_proc_name,
+    own_stack_fast_allow, parse_telemetry_mode, plausible_allow_reason, record_allow,
+    should_decoy_allow, stat_inode, telemetry_mode_label, EventSource, ProcessEvent,
+    TelemetryMode,
 };
 #[cfg(feature = "ebpf")]
 use jeTT::telemetry::{
@@ -512,6 +513,17 @@ fn log_verdict(verdict: &JettVerdict) {
         enforce_mode: verdict.enforce_mode,
         from_hard_rule: verdict.from_hard_rule,
     });
+
+    // Tier-3 durable verdict history — best-effort, never blocks the hot path.
+    jeTT::verdict_store::record_verdict(
+        &verdict.event,
+        &verdict.verdict,
+        &verdict.reason,
+        verdict.elapsed_ms,
+        verdict.enforce_mode,
+        &tier7,
+    );
+
     let explain_suffix = format!(" [{}]", tier7.explanation.summary());
 
     if dropped_logs > 0 {
@@ -829,6 +841,23 @@ fn handle_suspicious_inline(
     engine: &Engine,
 ) {
     let t = Instant::now();
+
+    if let Some(hits) = check_recent_allow(&event.name, &event.cmdline, &event.exe_path) {
+        let verdict = make_verdict(
+            event,
+            "✅ ALLOW".to_string(),
+            format!("debounced: identical spawn cleared ALLOW {}x in last {}ms window", hits, jeTT::telemetry::verdict_cache_ttl_ms()),
+            t.elapsed().as_millis() as u64,
+            false,
+            String::new(),
+            String::new(),
+            enforce_mode,
+            false,
+        );
+        log_verdict(&verdict);
+        return;
+    }
+
     println!(
         "🚨 [SUSPICIOUS DETECTED] {} ({}) — profiling behavior...",
         event.name,
@@ -872,6 +901,10 @@ fn handle_suspicious_inline(
             format!("ERROR: {}", error)
         }
     };
+
+    if reason.to_uppercase().contains("ALLOW") && !reason.to_uppercase().contains("QUARANTINE") {
+        record_allow(&event.name, &event.cmdline, &event.exe_path);
+    }
 
     let verdict = finalize_ai_verdict(
         event, &event_str, reason, enforce_mode, engine, t, false,
@@ -961,6 +994,26 @@ fn run_inference_worker(
 
     while let Ok(event) = ai_rx.recv() {
         let t = Instant::now();
+
+        if let Some(hits) = check_recent_allow(&event.name, &event.cmdline, &event.exe_path) {
+            stats
+                .ai_verdicts
+                .fetch_add(0, std::sync::atomic::Ordering::Relaxed);
+            let verdict = make_verdict(
+                event,
+                "✅ ALLOW".to_string(),
+                format!("debounced: identical spawn cleared ALLOW {}x in last {}ms window", hits, jeTT::telemetry::verdict_cache_ttl_ms()),
+                t.elapsed().as_millis() as u64,
+                false,
+                String::new(),
+                String::new(),
+                enforce_mode,
+                false,
+            );
+            log_verdict(&verdict);
+            continue;
+        }
+
         println!(
             "🚨 [SUSPICIOUS DETECTED] {} ({}) — profiling behavior...",
             event.name,
@@ -978,6 +1031,10 @@ fn run_inference_worker(
                 format!("ERROR: {}", error)
             }
         };
+
+        if reason.to_uppercase().contains("ALLOW") && !reason.to_uppercase().contains("QUARANTINE") {
+            record_allow(&event.name, &event.cmdline, &event.exe_path);
+        }
 
         stats
             .ai_verdicts
@@ -1159,6 +1216,20 @@ fn main() {
     } else {
         println!("[\u{1f6e1}] LEARN MODE — jeTT logs would-kills but does NOT kill (set JETT_MODE=enforce to enable killing)");
     }
+
+    // Resolve the TRUE effective mode (systemd drop-in / JETT_MODE wins over any
+    // nominal config) and durably record it for verdict history + the Bifrost
+    // mode-duration counter. Purely observational: never a stop/kill surface.
+    let effective_mode = if !enforce_mode {
+        "learn"
+    } else if enforce_dry_run() {
+        "enforce-dry-run"
+    } else {
+        "enforce"
+    };
+    jeTT::verdict_store::set_effective_mode(effective_mode);
+    jeTT::verdict_store::log_mode_transition(effective_mode, enforce_mode);
+
     println!("[*] Press Ctrl+C to stop\n");
 
     let seen_pids: Arc<Mutex<HashSet<u32>>> = Arc::new(Mutex::new(HashSet::new()));

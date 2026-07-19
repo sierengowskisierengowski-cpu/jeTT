@@ -6,6 +6,7 @@ pub mod event;
 pub mod hard_rules;
 pub mod never_fast_trust;
 pub mod stats;
+pub mod verdict_cache;
 
 pub use adversarial::{
     deception_mode, detect_evasion, honeypot_enabled, jittered_elapsed_ms, log_deception_audit,
@@ -28,3 +29,4 @@ pub use allowlist_config::{
 pub use hard_rules::{hard_quarantine_reason, own_stack_fast_allow, parse_guard_cmdline};
 pub use never_fast_trust::{guard_event_skips_fast_trust, matches_never_fast_trust, NEVER_FAST_TRUST};
 pub use stats::TelemetryStats;
+pub use verdict_cache::{check_recent_allow, record_allow, verdict_cache_ttl_ms};

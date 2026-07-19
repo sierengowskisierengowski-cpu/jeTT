@@ -24,8 +24,13 @@ struct {
 static __always_inline const char *jett_exec_filename(
 	struct trace_event_raw_sched_process_exec *ctx)
 {
+	/* __data_loc encodes (len << 16) | offset, where offset is measured
+	 * from the start of the trace entry itself (ctx), not after it —
+	 * see /sys/kernel/tracing/events/sched/sched_process_exec/format.
+	 * Adding sizeof(*ctx) here double-counts the header and reads past
+	 * the string for most execs, which is why paths came back empty. */
 	__u32 off = ctx->__data_loc_filename & 0xFFFF;
-	return (const char *)ctx + sizeof(*ctx) + off;
+	return (const char *)ctx + off;
 }
 
 SEC("tp/sched/sched_process_exec")

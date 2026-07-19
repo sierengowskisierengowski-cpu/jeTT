@@ -321,12 +321,17 @@ cmd_demo() {
   JETT_MODEL="$model" "$engine"
 }
 
+cmd_stats() {
+  bash "${REPO_ROOT}/scripts/jett_stats.sh" "$@"
+}
+
 cmd_help() {
   cat <<EOF
 jeTT control panel
 
   jett                  Open interactive menu
   jett status           Daemon + config summary
+  jett stats [-w]       ALLOW / quarantine dashboard (learn + enforce)
   jett start|stop|restart
   jett logs [-f]        Main daemon log (default: last 50 lines)
   jett audit [N]        Deception/scoring audit log
@@ -353,8 +358,9 @@ show_menu() {
   echo ""
   echo -e "  ${GREEN}1${NC}  Start daemon      ${RED}2${NC}  Stop daemon      ${YELLOW}3${NC}  Restart"
   echo -e "  ${CYAN}4${NC}  Status detail     ${CYAN}5${NC}  Live logs        ${CYAN}6${NC}  Quarantine log"
-  echo -e "  ${CYAN}7${NC}  Audit log         ${YELLOW}8${NC}  Guard test       ${YELLOW}9${NC}  Query jeTT"
-  echo -e "  ${YELLOW}0${NC}  Alert explain     ${DIM}a${NC}  Config           ${DIM}m${NC}  Set mode"
+  echo -e "  ${CYAN}7${NC}  Audit log         ${GREEN}t${NC}  Stats dashboard  ${YELLOW}8${NC}  Guard test"
+  echo -e "  ${YELLOW}9${NC}  Query jeTT        ${YELLOW}0${NC}  Alert explain"
+  echo -e "  ${DIM}a${NC}  Config           ${DIM}m${NC}  Set mode"
   echo -e "  ${DIM}r${NC}  Rebuild           ${DIM}s${NC}  ART smoke        ${DIM}d${NC}  Demo suite"
   echo ""
   echo -e "  ${DIM}h  Help    q  Quit${NC}"
@@ -410,6 +416,7 @@ menu_loop() {
       r|R) echo ""; cmd_rebuild; read -rp "  Enter..." _ ;;
       s|S) echo ""; cmd_smoke; read -rp "  Enter..." _ ;;
       d|D) echo ""; cmd_demo; read -rp "  Enter..." _ ;;
+      t|T) echo ""; cmd_stats -w ;;
       h|H) echo ""; cmd_help; read -rp "  Enter..." _ ;;
       q|Q) echo ""; exit 0 ;;
     esac
@@ -427,6 +434,7 @@ main() {
     stop) cmd_stop ;;
     restart) cmd_restart ;;
     status) cmd_status ;;
+    stats|dashboard|dash) cmd_stats "$@" ;;
     logs)
       if [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]]; then
         cmd_logs -f
